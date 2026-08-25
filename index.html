@@ -1302,7 +1302,8 @@ function renderDetail(id){
   const a = artworks.find(x=>x.id===id);
   if(!a) return `<p>Œuvre introuvable.</p>`;
   const artMovements = a.movements && a.movements.length ? a.movements : (a.movement ? [a.movement] : []);
-  const similarChips = (a.similarArtists||'').split(',').map(s=>s.trim()).filter(Boolean).map(name=>{
+  const artistRecForChips = getArtist(a.artist) || {};
+  const similarChips = (artistRecForChips.similarArtists||'').split(',').map(s=>s.trim()).filter(Boolean).map(name=>{
     return artistHasWorks(name) ? `<span class="artist-chip" data-artist="${esc(name)}">${esc(name)}</span>` : `<span class="plain">${esc(name)}</span>`;
   }).join(', ');
   return `
@@ -1624,11 +1625,18 @@ function renderAllMovementsPage(){
     if(p){ childrenOf[p] = childrenOf[p] || []; childrenOf[p].push(m); }
   });
 
+  function firstLine(text){
+    if(!text) return '';
+    const match = text.match(/^[^.!?]+[.!?]+/);
+    return match ? match[0].trim() : text.slice(0, 140).trim() + (text.length>140?'…':'');
+  }
+
   function renderCard(m, isChild){
     const info = movementInfo(m);
     const artistsHtml = (info.keyArtists||[]).map(name => {
       return artistHasWorks(name) ? `<span class="a-link" data-artist="${esc(name)}">${esc(name)}</span>` : `<span style="color:var(--ink-soft);">${esc(name)}</span>`;
     }).join(', ');
+    const thumbs = artworks.filter(a => (a.movements||[]).includes(m)).slice(0, 6);
     return `
       <div class="section" style="padding:16px 0;${isChild?'margin-left:24px;border-left:2px solid var(--line);padding-left:16px;':''}">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;">
@@ -1636,8 +1644,9 @@ function renderAllMovementsPage(){
           <button class="edit-link" onclick="openMovementInfoEditForm('${esc(m)}')">✎ Éditer</button>
         </div>
         <div style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--ink-soft);margin:4px 0 8px;">${esc(info.period)} · ${esc(info.origin)}</div>
-        <div style="font-size:13.5px;line-height:1.6;color:var(--ink-soft);max-width:680px;">${esc(info.desc)}</div>
+        <div style="font-size:13.5px;line-height:1.6;color:var(--ink-soft);max-width:680px;">${esc(firstLine(info.desc))}</div>
         ${artistsHtml ? `<div style="font-size:12.5px;margin-top:8px;"><span style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--ink-soft);text-transform:uppercase;">Artistes clés : </span>${artistsHtml}</div>` : ''}
+        ${thumbs.length ? `<div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap;">${thumbs.map(a=>`<img src="${imgSrc(a)}" data-artwork="${a.id}" title="${esc(a.title)}" style="width:52px;height:52px;object-fit:cover;border-radius:3px;cursor:pointer;">`).join('')}</div>` : ''}
       </div>`;
   }
 
@@ -1674,6 +1683,7 @@ function renderArtistsByMovementPage(){
         <div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:6px;">
           ${movementsForArtist.map(m => `<span style="font-family:'IBM Plex Mono',monospace;font-size:10px;padding:2px 8px;border-radius:10px;background:${movementInfo(m).color};color:white;cursor:pointer;" onclick="showMovement('${m}')">${m}</span>`).join('')}
         </div>
+        <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap;">${artworks.filter(a=>a.artist.trim()===name).slice(0,6).map(a=>`<img src="${imgSrc(a)}" data-artwork="${a.id}" title="${esc(a.title)}" style="width:52px;height:52px;object-fit:cover;border-radius:3px;cursor:pointer;">`).join('')}</div>
       </div>`;
     }).join('')}
   `;
@@ -1724,6 +1734,11 @@ function renderArtistPage(name){
         <div style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--accent);margin-bottom:6px;">⚠ Point de vigilance</div>
         <div style="font-size:13.5px;line-height:1.6;color:var(--ink);">${esc(ref.alert)}</div>
       </div>` : ''}
+      ${ref.similarArtists ? `
+      <div style="margin-top:18px;">
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-soft);margin-bottom:8px;">Artistes proches</div>
+        <div style="font-size:13.5px;">${ref.similarArtists.split(',').map(s=>s.trim()).filter(Boolean).map(n => artistHasWorks(n) ? `<span class="a-link" data-artist="${esc(n)}" style="margin-right:10px;">${esc(n)}</span>` : `<span style="color:var(--ink-soft);margin-right:10px;">${esc(n)}</span>`).join('')}</div>
+      </div>` : ''}
     </div>
     <div class="section-title">${items.length} œuvre${items.length>1?'s':''} dans votre carnet</div>
     <div class="artist-grid">${items.map(a=>`<img src="${imgSrc(a)}" data-artwork="${a.id}" title="${esc(a.title)}">`).join('')}</div>
@@ -1733,6 +1748,13 @@ function renderArtistPage(name){
 /* ================= FORM (ADD / EDIT) ================= */
 function openArtistEditForm(name){
   const rec = getArtist(name) || { name };
+  const currentSimilar = (rec.similarArtists||'').split(',').map(s=>s.trim().toLowerCase()).filter(Boolean);
+  const otherArtists = allArtistNames().filter(n=>n.trim().toLowerCase()!==name.trim().toLowerCase()).sort((x,y)=>x.localeCompare(y));
+  const similarRows = otherArtists.map(n=>`
+    <label class="similar-artist-item" data-search="${esc(n.toLowerCase())}" style="display:flex;align-items:center;gap:6px;font-size:12.5px;padding:3px 0;font-weight:400;">
+      <input type="checkbox" class="af-similar-cb" value="${esc(n)}" ${currentSimilar.includes(n.trim().toLowerCase())?'checked':''}>
+      <span>${esc(n)}</span>
+    </label>`).join('');
   document.getElementById('overlayContent').innerHTML = `
     <div class="modal-form">
       <button class="close-x" onclick="closeForm()">✕</button>
@@ -1747,6 +1769,12 @@ function openArtistEditForm(name){
       <label>Instagram</label><input type="url" id="af-instagram" value="${rec.instagram||''}">
       <label>Biographie (complète — seules les 2 premières phrases apparaîtront sur les fiches œuvre)</label><textarea id="af-bio" style="min-height:110px;">${rec.bio||''}</textarea>
       <label>Œuvres majeures (une par ligne, ordre chronologique)</label><textarea id="af-majorworks" placeholder="Titre (année)&#10;Titre (année)">${rec.majorWorks||''}</textarea>
+      <label>Artiste(s) proche(s)</label>
+      <input type="text" id="af-similar-search" placeholder="Rechercher un artiste..." oninput="filterSimilarArtistList()">
+      <div id="af-similar-list" style="max-height:180px;overflow-y:auto;border:1.5px solid var(--line);border-radius:3px;padding:8px 10px;margin-top:6px;">
+        ${similarRows || '<div style="color:var(--ink-soft);font-size:12px;">Aucun autre artiste dans votre carnet pour l\'instant.</div>'}
+      </div>
+      <label>Ajouter un nouvel artiste (optionnel)</label><input type="text" id="af-similar-new" placeholder="Nom d'un artiste absent de la liste">
       <label>Point de vigilance (optionnel — accusations documentées de violence, actes illégaux ou assimilés uniquement)</label><textarea id="af-alert" placeholder="Laisser vide si rien de documenté">${rec.alert||''}</textarea>
       <div class="form-actions">
         <button class="small-btn ghost" onclick="closeForm()">Annuler</button>
@@ -1756,7 +1784,16 @@ function openArtistEditForm(name){
   `;
   document.getElementById('overlay').classList.add('open');
 }
+function filterSimilarArtistList(){
+  const q = document.getElementById('af-similar-search').value.trim().toLowerCase();
+  document.querySelectorAll('.similar-artist-item').forEach(el => {
+    el.style.display = el.dataset.search.indexOf(q) !== -1 ? 'flex' : 'none';
+  });
+}
 async function submitArtistForm(name){
+  const selected = [...document.querySelectorAll('.af-similar-cb:checked')].map(cb=>cb.value);
+  const newName = document.getElementById('af-similar-new').value.trim();
+  const similarArtists = [...selected, ...(newName ? [newName] : [])].join(', ');
   await saveArtistRecord({
     name,
     birth: document.getElementById('af-birth').value.trim(),
@@ -1766,6 +1803,7 @@ async function submitArtistForm(name){
     instagram: document.getElementById('af-instagram').value.trim(),
     bio: document.getElementById('af-bio').value.trim(),
     majorWorks: document.getElementById('af-majorworks').value.trim(),
+    similarArtists,
     alert: document.getElementById('af-alert').value.trim(),
   });
   closeForm();
@@ -1814,8 +1852,9 @@ function openMovementInfoEditForm(key){
       <div class="sub">Ces modifications s'appliquent à ce courant partout dans l'app.</div>
       <label>Origine</label><input type="text" id="mv-origin" value="${esc(info.origin)}">
       <label>Période</label><input type="text" id="mv-period" value="${esc(info.period)}">
-      <label>Description</label><textarea id="mv-desc" style="min-height:90px;">${esc(info.desc)}</textarea>
-      <label>Artistes clés (séparés par des virgules)</label><input type="text" id="mv-artists" value="${(info.keyArtists||[]).join(', ')}">
+      <label>Description</label><textarea id="mv-desc" style="min-height:260px;">${esc(info.desc)}</textarea>
+      <label>Chronologie (une ligne par jalon, format "année | événement")</label>
+      <textarea id="mv-chrono" style="min-height:110px;" placeholder="1907 | Les Demoiselles d'Avignon">${(info.chrono||[]).map(([y,e])=>`${y} | ${e}`).join('\n')}</textarea>
       <label>Sous-courant de (optionnel — laisser vide si c'est un courant principal)</label>
       <select id="mv-parent">
         <option value="">— Courant principal —</option>
@@ -1828,16 +1867,23 @@ function openMovementInfoEditForm(key){
     </div>`;
   document.getElementById('overlay').classList.add('open');
 }
+function parseChronoInput(id){
+  return document.getElementById(id).value.split('\n').map(l=>l.trim()).filter(Boolean).map(l=>{
+    const idx = l.indexOf('|');
+    return idx === -1 ? [l, ''] : [l.slice(0,idx).trim(), l.slice(idx+1).trim()];
+  });
+}
 async function submitMovementInfoEdit(key){
   const parentVal = document.getElementById('mv-parent').value.trim();
+  const prevKeyArtists = movementInfo(key).keyArtists || [];
   customMovements[key] = {
     origin: document.getElementById('mv-origin').value.trim(),
     period: document.getElementById('mv-period').value.trim(),
     desc: document.getElementById('mv-desc').value.trim(),
-    keyArtists: document.getElementById('mv-artists').value.split(',').map(s=>s.trim()).filter(Boolean),
+    keyArtists: prevKeyArtists,
     parent: parentVal || null,
     color: movementInfo(key).color,
-    chrono: movementInfo(key).chrono
+    chrono: parseChronoInput('mv-chrono')
   };
   await saveCustomMovements();
   closeForm();
@@ -1855,8 +1901,9 @@ function openAddMovementForm(){
       <label>Nom *</label><input type="text" id="mv-name">
       <label>Origine</label><input type="text" id="mv-origin" placeholder="ex. Italie">
       <label>Période</label><input type="text" id="mv-period" placeholder="ex. 1920 – 1935">
-      <label>Description</label><textarea id="mv-desc" style="min-height:90px;"></textarea>
-      <label>Artistes clés (séparés par des virgules)</label><input type="text" id="mv-artists">
+      <label>Description</label><textarea id="mv-desc" style="min-height:260px;"></textarea>
+      <label>Chronologie (une ligne par jalon, format "année | événement")</label>
+      <textarea id="mv-chrono" style="min-height:110px;" placeholder="1907 | Les Demoiselles d'Avignon"></textarea>
       <label>Sous-courant de (optionnel)</label>
       <select id="mv-parent">
         <option value="">— Courant principal —</option>
@@ -1878,9 +1925,9 @@ async function submitAddMovement(color){
     origin: document.getElementById('mv-origin').value.trim(),
     period: document.getElementById('mv-period').value.trim(),
     desc: document.getElementById('mv-desc').value.trim(),
-    keyArtists: document.getElementById('mv-artists').value.split(',').map(s=>s.trim()).filter(Boolean),
+    keyArtists: [],
     parent: parentVal || null,
-    color, chrono: []
+    color, chrono: parseChronoInput('mv-chrono')
   };
   await saveCustomMovements();
   closeForm();
@@ -1924,12 +1971,12 @@ function openCreationForm(id){
       <label>Couleurs</label><textarea id="c-colors">${esc(c.colors||'')}</textarea>
       <label>Élément(s) principal(aux)</label><textarea id="c-elements">${esc(c.mainElements||'')}</textarea>
       <label>Inspiration (description libre)</label><textarea id="c-inspiration">${esc(c.inspirationText||'')}</textarea>
+      <label>Composition</label><textarea id="c-composition">${esc(c.composition||'')}</textarea>
       <label>Œuvres de ma galerie qui m'inspirent</label>
       <input type="text" id="c-inspiration-search" placeholder="Rechercher un titre ou un artiste..." oninput="filterInspirationList()">
       <div id="c-inspiration-list" style="max-height:180px;overflow-y:auto;border:1.5px solid var(--line);border-radius:3px;padding:8px 10px;margin-top:6px;">
         ${inspirationRows || '<div style="color:var(--ink-soft);font-size:12px;">Votre galerie est vide pour l\'instant.</div>'}
       </div>
-      <label>Composition</label><textarea id="c-composition">${esc(c.composition||'')}</textarea>
       <label>Courant(s) d'inspiration</label>
       <select id="c-movement-select" multiple size="8">${movementOptionsMulti}</select>
       <div class="form-actions">
@@ -2102,7 +2149,6 @@ function openForm(id){
   const artistList = allArtistNames();
   const isNewArtist = a.artist && !artistList.includes(a.artist);
   const artistOptions = artistList.map(n=>`<option value="${esc(n)}" ${a.artist===n?'selected':''}>${esc(n)}</option>`).join('');
-  const similarArtistOptions = artistList.map(n=>`<option value="${esc(n)}" ${a.similarArtists===n?'selected':''}>${esc(n)}</option>`).join('');
   const existingUrl = (a.imageUrl && !a.imageUrl.startsWith('data:')) ? a.imageUrl : '';
   document.getElementById('overlayContent').innerHTML = `
     <div class="modal-form">
@@ -2141,15 +2187,6 @@ function openForm(id){
           <input type="text" id="f-artist-new" value="${isNewArtist?esc(a.artist):''}" placeholder="Nom du nouvel artiste">
         </div>
         ${a.artist ? `<div style="margin-top:6px;"><button type="button" class="edit-link" onclick="openArtistEditForm('${esc(a.artist)}')">Modifier la fiche de ${esc(a.artist)} →</button></div>` : `<div style="font-size:11.5px;color:var(--ink-soft);margin-top:4px;">La biographie se modifie depuis la fiche artiste, une fois l'œuvre enregistrée.</div>`}
-        <label>Artiste proche</label>
-        <select id="f-similar-select" onchange="document.getElementById('f-similar-new-wrap').style.display = this.value==='__new__' ? 'block' : 'none';">
-          <option value="">— Aucun —</option>
-          ${similarArtistOptions}
-          <option value="__new__" ${a.similarArtists && !artistList.includes(a.similarArtists) ? 'selected' : ''}>+ Nouvel artiste…</option>
-        </select>
-        <div id="f-similar-new-wrap" style="display:${a.similarArtists && !artistList.includes(a.similarArtists) ? 'block' : 'none'};margin-top:6px;">
-          <input type="text" id="f-similar-new" value="${a.similarArtists && !artistList.includes(a.similarArtists) ? esc(a.similarArtists) : ''}" placeholder="Nom du nouvel artiste">
-        </div>
       </fieldset>
       <fieldset>
         <legend>Où voir l'œuvre</legend>
@@ -2190,15 +2227,10 @@ async function submitForm(){
   const title = document.getElementById('f-title').value.trim();
   const artistSelectVal = document.getElementById('f-artist-select').value;
   const artist = artistSelectVal === '__new__' ? document.getElementById('f-artist-new').value.trim() : artistSelectVal;
-  const similarSelectVal = document.getElementById('f-similar-select').value;
-  const similarArtists = similarSelectVal === '__new__' ? document.getElementById('f-similar-new').value.trim() : similarSelectVal;
   if(!title || !artist){
     const el = document.getElementById('mainImageZone');
     if(el) el.insertAdjacentHTML('beforebegin', '<div style="color:var(--accent);font-size:12px;margin-bottom:8px;">Le titre et le nom de l\'artiste sont nécessaires.</div>');
     return;
-  }
-  if(similarSelectVal === '__new__' && similarArtists && !getArtist(similarArtists)){
-    await saveArtistRecord({ name: similarArtists, birth:'', death:'', nationality:'', photo:'', instagram:'', bio:'', majorWorks:'', alert:'' });
   }
   const urlField = document.getElementById('f-image').value.trim();
   const data = {
@@ -2212,7 +2244,6 @@ async function submitForm(){
     composition: document.getElementById('f-composition').value.trim(),
     anecdote: document.getElementById('f-anecdote').value.trim(),
     tags: document.getElementById('f-tags').value.split(',').map(t=>t.trim()).filter(Boolean),
-    similarArtists,
     museum: document.getElementById('f-museum').value.trim(),
     museumCity: document.getElementById('f-city').value.trim(),
     museumCountry: document.getElementById('f-country').value.trim(),
