@@ -157,6 +157,7 @@
     <span id="navMiniTitle"></span>
   </div>
   <div class="links">
+    <button class="navbtn" onclick="goHome()" style="background:#2B6E63;color:white;border-color:#2B6E63;font-weight:600;">Galerie</button>
     <button class="navbtn" onclick="showAllMovements()">Courants</button>
     <button class="navbtn" onclick="showArtistsByMovement()">Artistes</button>
     <button class="navbtn" onclick="showCreations()">Mes œuvres</button>
@@ -170,7 +171,7 @@
       </div>
     </div>
     <input type="file" id="importFile" accept="application/json" style="display:none">
-    <button class="navbtn primary" onclick="openQuickAdd()">+ Ajouter une œuvre</button>
+    <button class="navbtn primary" onclick="openForm()">+ Ajouter une œuvre</button>
   </div>
 </nav>
 
@@ -557,6 +558,12 @@ function movementInfo(key){
 let artistsMap = {};
 function artistSlug(name){ return sanitizeFilename(name).toLowerCase(); }
 function getArtist(name){ return name ? (artistsMap[name.trim().toLowerCase()] || null) : null; }
+function movementKeysAlpha(){ return movementKeys().slice().sort((x,y)=>x.localeCompare(y)); }
+function allArtistNames(){
+  const fromRecords = Object.values(artistsMap).map(r=>r.name);
+  const fromArtworks = artworks.map(a=>a.artist);
+  return [...new Set([...fromRecords, ...fromArtworks].filter(Boolean))].sort((x,y)=>x.localeCompare(y));
+}
 async function loadArtists(){
   let keys = [];
   try{ const res = await st.list('artist:', false); keys = res && res.keys ? res.keys : []; }
@@ -693,16 +700,28 @@ function showStorageWarning(){
   banner.textContent = "La sauvegarde ne fonctionne pas sur cet appareil en ce moment — vos changements risquent de ne pas être conservés. Essayez de recharger la page, ou revenez depuis un ordinateur.";
   document.body.appendChild(banner);
 }
-async function deleteArtworkStorage(id){
+async function verifyDeleted(id){
   try{
+    const check = await st.get('artwork:'+id, false);
+    return !check || !check.value; // resolved with nothing = confirmed gone
+  }catch(e){
+    return true; // throwing on a missing key is the normal convention for a gone item
+  }
+}
+async function deleteArtworkStorage(id){
+  const attempt = async () => {
     const res = await st.delete('artwork:'+id, false);
     if(!res) throw new Error('no response');
+    const gone = await verifyDeleted(id);
+    if(!gone) throw new Error('toujours présent après suppression');
+  };
+  try{
+    await attempt();
     return true;
   }catch(e){
     try{
       await new Promise(r=>setTimeout(r,300));
-      const res2 = await st.delete('artwork:'+id, false);
-      if(!res2) throw new Error('no response on retry');
+      await attempt();
       return true;
     }catch(e2){
       console.error('Suppression impossible sur cet appareil (stockage indisponible).', e2);
@@ -1496,7 +1515,12 @@ function renderMovementPage(m){
   const info = movementInfo(m); const items = artworks.filter(a=>(a.movements||[]).includes(m));
   return `
     <button class="back" onclick="goHome()">← Retour à la galerie</button>
-    <div class="movement-hero"><h1>${m}</h1><div class="period">${info.period}</div><p>${info.desc}</p>
+    <div class="movement-hero">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;">
+        <h1 style="margin:0;">${m}</h1>
+        <button class="navbtn" onclick="openMovementInfoEditForm('${esc(m)}')">✎ Éditer</button>
+      </div>
+      <div class="period">${info.period}</div><p>${info.desc}</p>
       <div class="chrono">${info.chrono.map(([y,e])=>`<div class="chrono-item"><span class="year">${y}</span><span>${e}</span></div>`).join('')}</div>
     </div>
     <div class="section-title">Vos œuvres dans ce courant (${items.length})</div>
@@ -1525,11 +1549,9 @@ function renderCreationDetail(id){
   const c = creations.find(x=>x.id===id);
   if(!c) return `<p>Introuvable.</p>`;
   const titles = (c.titleDrafts||'').split('\n').map(s=>s.trim()).filter(Boolean);
-  const inspirationChips = (c.inspirationLinks||'').split(',').map(s=>s.trim()).filter(Boolean).map(t=>{
-    const match = artworks.find(a=>a.title.trim().toLowerCase()===t.toLowerCase());
-    return match ? `<span data-artwork="${match.id}" style="cursor:pointer;border-bottom:1px solid var(--accent);color:var(--accent);margin-right:10px;font-size:13px;">${esc(t)}</span>`
-                 : `<span style="color:var(--ink-soft);margin-right:10px;font-size:13px;">${esc(t)} <span style="font-size:10px;">(non trouvée dans la galerie)</span></span>`;
-  }).join('');
+  const inspirationNames = (c.inspirationLinks||'').split(',').map(s=>s.trim()).filter(Boolean);
+  const inspirationMatches = inspirationNames.map(t => artworks.find(a=>a.title.trim().toLowerCase()===t.toLowerCase())).filter(Boolean);
+  const inspirationNotFound = inspirationNames.filter(t => !artworks.some(a=>a.title.trim().toLowerCase()===t.toLowerCase()));
   return `
     <button class="back" onclick="showCreations()">← Retour à mes œuvres</button>
     <div class="detail-head">
@@ -1548,25 +1570,35 @@ function renderCreationDetail(id){
         <h1>${titles[0] ? esc(titles[0]) : 'Sans titre'}</h1>
         ${titles.length>1 ? `<div class="original-title">Autres pistes de titre : ${titles.slice(1).map(t=>esc(t)).join(' · ')}</div>` : ''}
         ${c.status ? `<span class="movement-badge" style="background:var(--ink);">${esc(c.status)}</span>` : ''}
-        <div class="field-grid"><div><span class="k">Technique</span>${c.technique||'—'}</div><div><span class="k">Format</span>${c.format||'—'}</div></div>
+        <div class="field-grid"><div><span class="k">Technique</span>${c.technique||'—'}</div></div>
       </div>
     </div>
     <div class="detail-body">
       <div class="section"><div class="section-title">Couleurs</div><div class="text-block">${c.colors?paragraphs(c.colors):'—'}</div></div>
-      <div class="section"><div class="section-title">Éléments principaux</div><div class="text-block">${c.mainElements?paragraphs(c.mainElements):'—'}</div></div>
+      <div class="section"><div class="section-title">Élément(s) principal(aux)</div><div class="text-block">${c.mainElements?paragraphs(c.mainElements):'—'}</div></div>
       <div class="section">
         <div class="section-title">Inspiration</div>
         <div class="text-block">${c.inspirationText?paragraphs(c.inspirationText):'—'}</div>
-        ${inspirationChips ? `<div style="margin-top:10px;">${inspirationChips}</div>` : ''}
+        ${inspirationMatches.length ? `
+        <div style="margin-top:14px;">
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--ink-soft);text-transform:uppercase;margin-bottom:8px;">Œuvres de ma galerie qui m'inspirent</div>
+          <div class="artist-grid">${inspirationMatches.map(a=>`<img src="${imgSrc(a)}" data-artwork="${a.id}" title="${esc(a.title)}">`).join('')}</div>
+        </div>` : ''}
+        ${inspirationNotFound.length ? `<div style="margin-top:8px;font-size:12px;color:var(--ink-soft);">Non trouvée(s) dans la galerie : ${inspirationNotFound.map(t=>esc(t)).join(', ')}</div>` : ''}
+        <div style="margin-top:18px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--ink-soft);text-transform:uppercase;">Images d'inspiration (photos, images du net — pas ajoutées à la galerie)</span>
+            <button class="edit-link" onclick="openCreationInspirationImageDialog(${c.id})">+ Ajouter</button>
+          </div>
+          ${(c.inspirationImages||[]).length ? `<div class="movement-grid">${(c.inspirationImages||[]).map(img=>`<img src="${img}" onclick="window.open('${img}','_blank')">`).join('')}</div>` : `<div style="color:var(--ink-soft);font-size:12px;">Aucune pour l'instant.</div>`}
+        </div>
       </div>
+      <div class="section"><div class="section-title">Composition</div><div class="text-block">${c.composition?paragraphs(c.composition):'—'}</div></div>
+      ${c.feeling ? `<div class="section"><div class="section-title">Ressenti recherché</div><div class="text-block">${paragraphs(c.feeling)}</div></div>` : ''}
       <div class="section">
         <div class="section-title">Courant(s) d'inspiration</div>
         <div style="display:flex;flex-wrap:wrap;gap:6px;">${(c.movements||[]).map(m=>`<button class="movement-badge" style="background:${movementInfo(m).color};margin-bottom:0;" onclick="showMovement('${m}')">${m}</button>`).join('') || '<span style="color:var(--ink-soft);font-size:13px;">—</span>'}</div>
       </div>
-      <div class="section"><div class="section-title">Composition</div><div class="text-block">${c.composition?paragraphs(c.composition):'—'}</div></div>
-      <div class="section"><div class="section-title">Références</div><div class="text-block">${c.references?paragraphs(c.references):'—'}</div></div>
-      <div class="section"><div class="section-title">Lieux</div><div class="text-block">${c.places?paragraphs(c.places):'—'}</div></div>
-      ${c.feeling ? `<div class="section"><div class="section-title">Ressenti recherché</div><div class="text-block">${paragraphs(c.feeling)}</div></div>` : ''}
       <div class="section">
         <div class="section-title">Notes <button class="edit-link" onclick="toggleEditCreationNotes(${c.id})">éditer</button></div>
         <div id="cNotesDisplay-${c.id}">${c.notes && c.notes.trim() ? `<div class="text-block">${paragraphs(c.notes)}</div>` : `<div class="notes-empty" onclick="toggleEditCreationNotes(${c.id})">Pas encore de notes — cliquez pour en ajouter</div>`}</div>
@@ -1618,32 +1650,29 @@ function renderAllMovementsPage(){
 }
 
 function renderArtistsByMovementPage(){
-  const byMovement = {};
+  const byArtist = {};
   artworks.forEach(a => {
+    const name = a.artist.trim();
+    byArtist[name] = byArtist[name] || new Set();
     const list = a.movements && a.movements.length ? a.movements : (a.movement ? [a.movement] : []);
-    list.forEach(m => {
-      byMovement[m] = byMovement[m] || new Set();
-      byMovement[m].add(a.artist.trim());
-    });
+    list.forEach(m => byArtist[name].add(m));
   });
-  const movementsPresent = movementKeys().filter(m => byMovement[m] && byMovement[m].size > 0);
+  const names = Object.keys(byArtist).sort((x,y)=>x.localeCompare(y));
 
-  if(movementsPresent.length === 0){
+  if(names.length === 0){
     return `<div class="empty-state"><h2>Pas encore d'artiste à afficher</h2><p>Ajoutez des œuvres à votre carnet pour voir cette page se remplir.</p></div>`;
   }
 
   return `
     <div class="home-toolbar"><h1>Artistes</h1></div>
-    <p style="color:var(--ink-soft);font-size:13px;margin-top:-10px;margin-bottom:24px;max-width:600px;">Les artistes que vous aimez, classés par courant — uniquement ceux déjà présents dans votre carnet.</p>
-    ${movementsPresent.map(m => {
-      const info = movementInfo(m);
-      const artists = [...byMovement[m]].sort((a,b)=>a.localeCompare(b));
+    <p style="color:var(--ink-soft);font-size:13px;margin-top:-10px;margin-bottom:24px;max-width:600px;">Vos artistes, par ordre alphabétique.</p>
+    ${names.map(name => {
+      const movementsForArtist = [...byArtist[name]];
       return `
-      <div class="section" style="padding:20px 0;">
-        <button class="movement-badge" style="background:${info.color};font-size:13px;padding:6px 14px;margin-bottom:8px;" onclick="showMovement('${m}')">${m}</button>
-        <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--ink-soft);margin-bottom:14px;">${info.period} · ${info.origin}</div>
-        <div style="display:flex;flex-wrap:wrap;gap:8px;">
-          ${artists.map(name => `<span class="a-link" data-artist="${esc(name)}" style="font-size:14px;padding:5px 12px;border:1px solid var(--line);border-radius:14px;">${esc(name)}</span>`).join('')}
+      <div class="section" style="padding:14px 0;">
+        <span class="a-link" data-artist="${esc(name)}" style="font-family:'Fraunces',serif;font-weight:500;font-size:17px;">${esc(name)}</span>
+        <div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:6px;">
+          ${movementsForArtist.map(m => `<span style="font-family:'IBM Plex Mono',monospace;font-size:10px;padding:2px 8px;border-radius:10px;background:${movementInfo(m).color};color:white;cursor:pointer;" onclick="showMovement('${m}')">${m}</span>`).join('')}
         </div>
       </div>`;
     }).join('')}
@@ -1658,7 +1687,6 @@ function renderLocationPage(name){
     <button class="back" onclick="goHome()">← Retour à la galerie</button>
     <div class="artist-hero"><h1>${esc(name)}</h1>
       <div class="meta">${[ref.museumCity, ref.museumCountry].filter(Boolean).join(', ')}</div>
-      ${ref.museumLink ? `<p><a href="${ref.museumLink}" target="_blank">Voir sur le site →</a></p>` : ''}
     </div>
     <div class="section-title">${items.length} œuvre${items.length>1?'s':''} à voir sur place</div>
     <div class="artist-grid">${items.map(a=>`<img src="${imgSrc(a)}" data-artwork="${a.id}" title="${esc(a.title)}">`).join('')}</div>
@@ -1673,12 +1701,17 @@ function renderArtistPage(name){
   return `
     <button class="back" onclick="goHome()">← Retour à la galerie</button>
     <div class="artist-hero">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;">
-        <h1>${esc(name)}</h1>
-        <button class="navbtn" onclick="openArtistEditForm('${esc(name)}')">Modifier la fiche artiste</button>
+      <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;">
+        <img class="artist-photo" src="${ref.photo || placeholderImg({title:name, movements:[]})}" alt="${esc(name)}" style="width:90px;height:90px;flex-shrink:0;">
+        <div style="flex:1;min-width:200px;">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;">
+            <h1 style="margin:0;">${esc(name)}</h1>
+            <button class="navbtn" onclick="openArtistEditForm('${esc(name)}')">Modifier la fiche artiste</button>
+          </div>
+          <div class="meta">${ref.nationality||''}${ref.birth?` · né(e) en ${ref.birth}`:''}${ref.death?`, mort(e) en ${ref.death}`:''}</div>
+        </div>
       </div>
-      <div class="meta">${ref.nationality||''}${ref.birth?` · né(e) en ${ref.birth}`:''}${ref.death?`, mort(e) en ${ref.death}`:''}</div>
-      <div class="text-block" style="color:var(--ink-soft);max-width:640px;">${ref.bio ? paragraphs(ref.bio) : '<p>Pas encore de biographie — cliquez « Modifier la fiche artiste » pour en ajouter une.</p>'}</div>
+      <div class="text-block" style="color:var(--ink-soft);max-width:640px;margin-top:14px;">${ref.bio ? paragraphs(ref.bio) : '<p>Pas encore de biographie — cliquez « Modifier la fiche artiste » pour en ajouter une.</p>'}</div>
       ${majorWorksList.length ? `
       <div style="margin-top:18px;">
         <div style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-soft);margin-bottom:8px;">Œuvres majeures</div>
@@ -1855,12 +1888,21 @@ async function submitAddMovement(color){
 }
 
 /* ================= MES ŒUVRES (form + actions) ================= */
+function filterInspirationList(){
+  const q = document.getElementById('c-inspiration-search').value.trim().toLowerCase();
+  document.querySelectorAll('.inspiration-item').forEach(el => {
+    el.style.display = el.dataset.search.indexOf(q) !== -1 ? 'flex' : 'none';
+  });
+}
 function openCreationForm(id){
   const c = id ? creations.find(x=>x.id===id) : {};
   const currentMovements = c.movements || [];
-  const movementCbs = movementKeys().map(m=>`
-    <label style="display:inline-flex;align-items:center;gap:5px;font-family:'IBM Plex Sans',sans-serif;font-size:12.5px;color:var(--ink);margin:0 12px 8px 0;font-weight:400;">
-      <input type="checkbox" class="c-movement-cb" value="${esc(m)}" ${currentMovements.includes(m)?'checked':''}> ${esc(m)}
+  const movementOptionsMulti = movementKeysAlpha().map(m=>`<option value="${esc(m)}" ${currentMovements.includes(m)?'selected':''}>${esc(m)}</option>`).join('');
+  const currentInspirationTitles = (c.inspirationLinks||'').split(',').map(s=>s.trim().toLowerCase()).filter(Boolean);
+  const inspirationRows = artworks.slice().sort((x,y)=>x.title.localeCompare(y.title)).map(a=>`
+    <label class="inspiration-item" data-search="${esc((a.title+' '+a.artist).toLowerCase())}" style="display:flex;align-items:center;gap:6px;font-size:12.5px;padding:3px 0;font-weight:400;">
+      <input type="checkbox" class="c-inspiration-cb" value="${esc(a.title)}" ${currentInspirationTitles.includes(a.title.trim().toLowerCase())?'checked':''}>
+      <span>${esc(a.title)} <span style="color:var(--ink-soft);">— ${esc(a.artist)}</span></span>
     </label>`).join('');
   document.getElementById('overlayContent').innerHTML = `
     <div class="modal-form">
@@ -1877,20 +1919,19 @@ function openCreationForm(id){
         <option value="En cours" ${c.status==='En cours'?'selected':''}>En cours</option>
         <option value="Terminée" ${c.status==='Terminée'?'selected':''}>Terminée</option>
       </select>
-      <div class="row2">
-        <div><label>Technique</label><input type="text" id="c-technique" value="${esc(c.technique||'')}" placeholder="ex. Crayon graphite"></div>
-        <div><label>Format</label><input type="text" id="c-format" value="${esc(c.format||'')}" placeholder="ex. A4, carnet"></div>
-      </div>
+      <label>Technique</label><input type="text" id="c-technique" value="${esc(c.technique||'')}" placeholder="ex. Crayon graphite">
+      <label>Ressenti recherché</label><textarea id="c-feeling" placeholder="Ce que vous voulez que ça transmette">${esc(c.feeling||'')}</textarea>
       <label>Couleurs</label><textarea id="c-colors">${esc(c.colors||'')}</textarea>
-      <label>Éléments principaux</label><textarea id="c-elements">${esc(c.mainElements||'')}</textarea>
+      <label>Élément(s) principal(aux)</label><textarea id="c-elements">${esc(c.mainElements||'')}</textarea>
       <label>Inspiration (description libre)</label><textarea id="c-inspiration">${esc(c.inspirationText||'')}</textarea>
-      <label>Œuvres de ma galerie qui m'inspirent (titres exacts, séparés par des virgules)</label><input type="text" id="c-inspirationlinks" value="${esc(c.inspirationLinks||'')}">
-      <label>Courant(s) d'inspiration</label>
-      <div style="margin-bottom:8px;">${movementCbs}</div>
+      <label>Œuvres de ma galerie qui m'inspirent</label>
+      <input type="text" id="c-inspiration-search" placeholder="Rechercher un titre ou un artiste..." oninput="filterInspirationList()">
+      <div id="c-inspiration-list" style="max-height:180px;overflow-y:auto;border:1.5px solid var(--line);border-radius:3px;padding:8px 10px;margin-top:6px;">
+        ${inspirationRows || '<div style="color:var(--ink-soft);font-size:12px;">Votre galerie est vide pour l\'instant.</div>'}
+      </div>
       <label>Composition</label><textarea id="c-composition">${esc(c.composition||'')}</textarea>
-      <label>Références (ex. la vie quotidienne d'une maman)</label><textarea id="c-references">${esc(c.references||'')}</textarea>
-      <label>Lieux</label><input type="text" id="c-places" value="${esc(c.places||'')}">
-      <label>Ressenti recherché (optionnel)</label><textarea id="c-feeling" placeholder="Ce que vous voulez que ça transmette">${esc(c.feeling||'')}</textarea>
+      <label>Courant(s) d'inspiration</label>
+      <select id="c-movement-select" multiple size="8">${movementOptionsMulti}</select>
       <div class="form-actions">
         ${id?`<button class="small-btn ghost" onclick="deleteCreation(${id})" style="color:var(--accent);border-color:var(--accent);">Supprimer</button>`:''}
         <button class="small-btn ghost" onclick="closeForm()">Annuler</button>
@@ -1909,15 +1950,12 @@ async function submitCreationForm(id){
     titleDrafts,
     status: document.getElementById('c-status').value,
     technique: document.getElementById('c-technique').value.trim(),
-    format: document.getElementById('c-format').value.trim(),
     colors: document.getElementById('c-colors').value.trim(),
     mainElements: document.getElementById('c-elements').value.trim(),
     inspirationText: document.getElementById('c-inspiration').value.trim(),
-    inspirationLinks: document.getElementById('c-inspirationlinks').value.trim(),
-    movements: [...document.querySelectorAll('.c-movement-cb:checked')].map(cb=>cb.value),
+    inspirationLinks: [...document.querySelectorAll('.c-inspiration-cb:checked')].map(cb=>cb.value).join(', '),
+    movements: [...document.getElementById('c-movement-select').selectedOptions].map(o=>o.value),
     composition: document.getElementById('c-composition').value.trim(),
-    references: document.getElementById('c-references').value.trim(),
-    places: document.getElementById('c-places').value.trim(),
     feeling: document.getElementById('c-feeling').value.trim(),
   };
   let updated;
@@ -2016,25 +2054,61 @@ async function submitCreationPhoto(id){
   await saveCreation(c); closeForm(); showCreationDetail(id);
 }
 
+function openCreationInspirationImageDialog(id){
+  document.getElementById('overlayContent').innerHTML = `
+    <div class="modal-form" style="max-width:440px;">
+      <button class="close-x" onclick="closeForm()">✕</button>
+      <h2>Ajouter une image d'inspiration</h2>
+      <div class="sub">Une photo prise, ou une image trouvée sur le net — reste liée à cette création uniquement, ne s'ajoute pas à votre galerie.</div>
+      <div class="image-zone" id="cInspImgZone" tabindex="0">
+        <div class="zone-text" id="cInspImgZoneText">Cliquez pour choisir un fichier,<br>ou collez une image (Ctrl+V)</div>
+        <input type="file" id="cInspImgFile" accept="image/*" style="display:none">
+      </div>
+      <div class="or-sep">— ou collez un lien —</div>
+      <input type="url" id="cInspImgUrl" placeholder="https://...">
+      <div class="form-actions">
+        <button class="small-btn ghost" onclick="closeForm()">Annuler</button>
+        <button class="small-btn" onclick="submitCreationInspirationImage(${id})">Ajouter</button>
+      </div>
+    </div>`;
+  document.getElementById('overlay').classList.add('open');
+  const zone = document.getElementById('cInspImgZone');
+  zone.addEventListener('click', ()=>document.getElementById('cInspImgFile').click());
+  document.getElementById('cInspImgFile').addEventListener('change', async(e)=>{
+    if(e.target.files[0]){ formMainImageData = await fileToDataURL(e.target.files[0]); document.getElementById('cInspImgZoneText').innerHTML = '<img class="zone-preview" src="'+formMainImageData+'"><div>Prête</div>'; }
+  });
+  zone.addEventListener('paste', async(e)=>{
+    const items=(e.clipboardData||window.clipboardData).items;
+    for(const item of items){ if(item.type.indexOf('image')===0){ formMainImageData = await fileToDataURL(item.getAsFile()); document.getElementById('cInspImgZoneText').innerHTML = '<img class="zone-preview" src="'+formMainImageData+'"><div>Collée</div>'; } }
+  });
+  formMainImageData = null;
+}
+async function submitCreationInspirationImage(id){
+  const url = document.getElementById('cInspImgUrl').value.trim();
+  const value = formMainImageData || url;
+  if(!value){ showAlert("Ajoutez un fichier, collez une image, ou renseignez un lien."); return; }
+  const c = creations.find(x=>x.id===id);
+  c.inspirationImages = c.inspirationImages || [];
+  c.inspirationImages.push(value);
+  await saveCreation(c); closeForm(); showCreationDetail(id);
+}
+
 function openForm(id){
   editingId = id || null;
   const a = id ? artworks.find(x=>x.id===id) : {};
   formMainImageData = (a.imageUrl && a.imageUrl.startsWith('data:')) ? a.imageUrl : null;
   const currentMovements = a.movements && a.movements.length ? a.movements : (a.movement ? [a.movement] : []);
-  const movementCheckboxes = movementKeys().map(m=>`
-    <label style="display:inline-flex;align-items:center;gap:5px;font-family:'IBM Plex Sans',sans-serif;font-size:12.5px;color:var(--ink);margin:0 12px 8px 0;font-weight:400;">
-      <input type="checkbox" class="f-movement-cb" value="${m}" ${currentMovements.includes(m)?'checked':''}> ${m}
-    </label>`).join('');
+  const movementOptionsMulti = movementKeysAlpha().map(m=>`<option value="${esc(m)}" ${currentMovements.includes(m)?'selected':''}>${esc(m)}</option>`).join('');
+  const artistList = allArtistNames();
+  const isNewArtist = a.artist && !artistList.includes(a.artist);
+  const artistOptions = artistList.map(n=>`<option value="${esc(n)}" ${a.artist===n?'selected':''}>${esc(n)}</option>`).join('');
+  const similarArtistOptions = artistList.map(n=>`<option value="${esc(n)}" ${a.similarArtists===n?'selected':''}>${esc(n)}</option>`).join('');
   const existingUrl = (a.imageUrl && !a.imageUrl.startsWith('data:')) ? a.imageUrl : '';
   document.getElementById('overlayContent').innerHTML = `
     <div class="modal-form">
       <button class="close-x" onclick="closeForm()">✕</button>
       <h2>${id?'Modifier':'Ajouter'} une œuvre</h2>
       <div class="sub">${id?'Mettez à jour les informations de cette œuvre.':'Renseignez ce que vous savez — vous pourrez toujours compléter plus tard.'}</div>
-      <div style="margin-bottom:16px;">
-        <button type="button" class="small-btn" id="aiGenBtn" onclick="generateWithAI()">✨ Compléter avec l'IA</button>
-        <div id="aiGenStatus" style="font-size:11px;color:var(--ink-soft);margin-top:6px;line-height:1.5;">À partir du titre et de l'artiste ci-dessous. Ne remplit que les champs encore vides — vérifiez toujours les dates et détails précis avant d'enregistrer.</div>
-      </div>
       <fieldset>
         <legend>Œuvre</legend>
         <label>Titre (français) *</label><input type="text" id="f-title" value="${a.title||''}">
@@ -2046,8 +2120,8 @@ function openForm(id){
         </div>
         <div class="or-sep">— ou collez un lien —</div>
         <input type="url" id="f-image" value="${existingUrl}" placeholder="https://...">
-        <label>Courant(s) — plusieurs choix possibles</label>
-        <div style="margin-bottom:8px;">${movementCheckboxes}</div>
+        <label>Courant(s) — Ctrl/Cmd + clic pour sélection multiple</label>
+        <select id="f-movement-select" multiple size="8">${movementOptionsMulti}</select>
         <label>Période / date</label><input type="text" id="f-period" value="${a.period||''}" placeholder="ex. 1818-1819">
         <label>Technique</label><input type="text" id="f-technique" value="${a.technique||''}" placeholder="ex. Huile sur toile">
         <label>À propos de l'œuvre</label><textarea id="f-description" style="min-height:90px;">${a.description||''}</textarea>
@@ -2057,15 +2131,30 @@ function openForm(id){
       </fieldset>
       <fieldset>
         <legend>Artiste</legend>
-        <label>Nom *</label><input type="text" id="f-artist" value="${a.artist||''}">
+        <label>Nom *</label>
+        <select id="f-artist-select" onchange="document.getElementById('f-artist-new-wrap').style.display = this.value==='__new__' ? 'block' : 'none';">
+          <option value="">— Choisir —</option>
+          ${artistOptions}
+          <option value="__new__" ${isNewArtist?'selected':''}>+ Nouvel artiste…</option>
+        </select>
+        <div id="f-artist-new-wrap" style="display:${isNewArtist?'block':'none'};margin-top:6px;">
+          <input type="text" id="f-artist-new" value="${isNewArtist?esc(a.artist):''}" placeholder="Nom du nouvel artiste">
+        </div>
         ${a.artist ? `<div style="margin-top:6px;"><button type="button" class="edit-link" onclick="openArtistEditForm('${esc(a.artist)}')">Modifier la fiche de ${esc(a.artist)} →</button></div>` : `<div style="font-size:11.5px;color:var(--ink-soft);margin-top:4px;">La biographie se modifie depuis la fiche artiste, une fois l'œuvre enregistrée.</div>`}
-        <label>Artistes proches / similaires</label><input type="text" id="f-similar" value="${a.similarArtists||''}" placeholder="séparés par des virgules">
+        <label>Artiste proche</label>
+        <select id="f-similar-select" onchange="document.getElementById('f-similar-new-wrap').style.display = this.value==='__new__' ? 'block' : 'none';">
+          <option value="">— Aucun —</option>
+          ${similarArtistOptions}
+          <option value="__new__" ${a.similarArtists && !artistList.includes(a.similarArtists) ? 'selected' : ''}>+ Nouvel artiste…</option>
+        </select>
+        <div id="f-similar-new-wrap" style="display:${a.similarArtists && !artistList.includes(a.similarArtists) ? 'block' : 'none'};margin-top:6px;">
+          <input type="text" id="f-similar-new" value="${a.similarArtists && !artistList.includes(a.similarArtists) ? esc(a.similarArtists) : ''}" placeholder="Nom du nouvel artiste">
+        </div>
       </fieldset>
       <fieldset>
         <legend>Où voir l'œuvre</legend>
         <label>Musée / galerie</label><input type="text" id="f-museum" value="${a.museum||''}">
         <div class="row2"><div><label>Ville</label><input type="text" id="f-city" value="${a.museumCity||''}"></div><div><label>Pays</label><input type="text" id="f-country" value="${a.museumCountry||''}"></div></div>
-        <label>Lien vers le site du musée / de la galerie</label><input type="url" id="f-museumlink" value="${a.museumLink||''}">
       </fieldset>
       <div class="form-actions">
         ${id?`<button class="small-btn ghost" onclick="deleteArtwork(${id})" style="color:var(--accent);border-color:var(--accent);">Supprimer</button>`:''}
@@ -2095,435 +2184,38 @@ function openForm(id){
     }
   });
 }
-function matchMovement(name){
-  const key = movementKeys().find(m => m.toLowerCase() === String(name||'').trim().toLowerCase());
-  return key || null;
-}
-function matchMovements(arr){
-  if(!Array.isArray(arr)) return [];
-  return arr.map(matchMovement).filter(Boolean);
-}
-
-async function callArtAI(title, artist, movementHint, periodHint){
-  const movementList = movementKeys().join(', ');
-  const prompt = `Tu es un historien de l'art rigoureux. La personne a indiqué le titre "${title}" et l'artiste "${artist}"${movementHint?` (courant indiqué : ${movementHint})`:''}${periodHint?`, période indiquée : ${periodHint}`:''} — ces informations peuvent être abrégées, mal orthographiées ou incomplètes. Identifie l'œuvre la plus probable et réponds UNIQUEMENT avec un objet JSON valide, sans backticks ni texte avant/après, au format exact suivant :
-{
-  "correctedTitle": "titre complet et exact de l'œuvre (corrige les fautes, complète si abrégé ; identique à l'original si déjà exact)",
-  "correctedArtist": "nom complet et exact de l'artiste (corrige les fautes, complète le prénom si absent ; identique à l'original si déjà exact)",
-  "description": "2-3 phrases présentant l'œuvre : sujet, contexte de création, pourquoi elle est connue",
-  "commissionNote": "une phrase indiquant qui a commandé l'œuvre ou pour quelle occasion/événement elle a été créée, UNIQUEMENT si c'est documenté (commande officielle, événement précis) ; chaîne vide si c'était une simple démarche créative personnelle sans commanditaire ni occasion particulière",
-  "composition": ["premier paragraphe d'analyse (composition/symbolique)", "deuxième paragraphe (contexte historique)", "troisième paragraphe optionnel"],
-  "anecdote": "un fait insolite, peu connu ou surprenant sur cette œuvre précise (1-3 phrases) ; chaîne vide si rien de notable à signaler",
-  "artistBio": "biographie complète et développée de l'artiste (8-12 phrases : formation, évolution du style, place dans l'histoire de l'art) — pas seulement 2-3 phrases",
-  "artistMajorWorks": ["Titre 1 (année)", "Titre 2 (année)", "Titre 3 (année)", "Titre 4 (année, optionnel)", "Titre 5 (année, optionnel)"],
-  "artistAlert": "une ou deux phrases factuelles et neutres UNIQUEMENT si l'artiste a fait l'objet d'accusations largement documentées de violence, d'actes illégaux ou assimilés (ex. violences conjugales documentées, actes de guerre, etc.) ; chaîne vide dans tous les autres cas — ne jamais inventer, ne jamais exagérer, rester factuel",
-  "artistNationality": "nationalité de l'artiste",
-  "artistBirth": "année de naissance, nombre seul, chaîne vide si inconnue ou non pertinente",
-  "artistDeath": "année de décès, nombre seul, chaîne vide si vivant(e) ou inconnue",
-  "similarArtists": "2-3 noms d'artistes proches séparés par des virgules",
-  "tags": ["3", "4", "mots-cles", "courts"],
-  "technique": "technique et dimensions si connues, chaîne vide sinon",
-  "originalTitle": "titre en langue d'origine si différent, chaîne vide sinon",
-  "museum": "nom du musée, de la galerie, du lieu ou de la collection où l'œuvre se trouve ou est exposée ; utilise \"Collection privée\" si non localisable publiquement",
-  "museumCity": "ville où se trouve l'œuvre, chaîne vide si vraiment inconnue",
-  "museumCountry": "pays où se trouve l'œuvre, chaîne vide si vraiment inconnue",
-  "museumLink": "URL du site officiel du musée/de la collection si connue, chaîne vide sinon",
-  "movements": ["TOUS les courants EXACTS pertinents parmi cette liste (tableau) : ${movementList}. Ne te limite pas à un seul par défaut : identifie chaque courant auquel l'œuvre peut raisonnablement être rattachée (ex. une œuvre post-impressionniste précurseur du fauvisme peut relever des deux à la fois). N'en propose qu'un seul uniquement si les autres ne s'appliquent vraiment pas. Place toujours le courant principal (le plus représentatif de l'œuvre) en premier dans le tableau."],
-  "period": "date ou période de création, ex. 1830 ou 1818-1819"
-}
-Si le titre ou l'artiste fournis sont ambigus au point de ne pas pouvoir identifier une œuvre précise, garde "correctedTitle" et "correctedArtist" identiques à ce qui a été fourni plutôt que d'inventer.
-Sois factuel. Si tu n'es pas certain d'une date ou d'une dimension précise, indique une valeur approximative plutôt que d'inventer un chiffre exact. Le champ "composition" doit être un tableau JSON de chaînes (une chaîne par paragraphe, sans retour à la ligne à l'intérieur d'une chaîne). Réponds en français.`;
-
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 1600, messages: [{ role: "user", content: prompt }] })
-  });
-  if(!response.ok){
-    const errText = await response.text().catch(()=>'(illisible)');
-    throw new Error('Erreur API ' + response.status + ' : ' + errText.slice(0,300));
-  }
-  const responseClone = response.clone();
-  let data;
-  try{
-    data = await response.json();
-  }catch(jsonErr){
-    const raw = await responseClone.text().catch(()=>'');
-    throw new Error('Réponse serveur non-JSON : ' + (raw ? raw.slice(0,300) : '(réponse vide)'));
-  }
-  const textResp = (data.content || []).filter(b=>b.type==='text').map(b=>b.text).join('\n');
-  const clean = textResp.replace(/```json|```/g,'').trim().replace(/[\r\n]+/g,' ');
-  let result;
-  try{
-    result = JSON.parse(clean);
-  }catch(parseErr){
-    throw new Error('Réponse IA imprévue : ' + (clean ? clean.slice(0,300) : '(vide)'));
-  }
-  result.composition = Array.isArray(result.composition) ? result.composition.join('\n\n') : (result.composition || '');
-  if(result.commissionNote && result.commissionNote.trim()){
-    result.description = (result.description || '').trim() + '\n' + result.commissionNote.trim();
-  }
-  result.artistMajorWorks = Array.isArray(result.artistMajorWorks) ? result.artistMajorWorks.join('\n') : (result.artistMajorWorks || '');
-  return result;
-}
-
-/* ---- Quick add: title + artist only ---- */
-function openQuickAdd(){
-  document.getElementById('overlayContent').innerHTML = `
-    <div class="modal-form" style="max-width:420px;">
-      <button class="close-x" onclick="closeForm()">✕</button>
-      <h2>Nouvelle œuvre</h2>
-      <div class="sub">Indiquez le titre et l'artiste — l'IA rédige et enregistre automatiquement le reste de la fiche (description, composition, biographie, dates, technique, mots-clés...).</div>
-      <label>Titre *</label><input type="text" id="qa-title" placeholder="ex. Guernica">
-      <label>Artiste *</label><input type="text" id="qa-artist" placeholder="ex. Pablo Picasso">
-      <div id="qaStatus" style="font-size:12px;color:var(--ink-soft);margin-top:10px;line-height:1.5;"></div>
-      <div class="form-actions" style="justify-content:space-between;">
-        <button class="small-btn ghost" onclick="openQuickAddPhoto()">📷 Identifier depuis une photo</button>
-        <div style="display:flex;gap:10px;">
-          <button class="small-btn ghost" onclick="openForm()">Remplir moi-même</button>
-          <button class="small-btn" id="qaGenBtn" onclick="quickAddGenerate()">✨ Générer et créer la fiche</button>
-        </div>
-      </div>
-    </div>
-  `;
-  document.getElementById('overlay').classList.add('open');
-}
-
-function dataURLParts(dataURL){
-  const match = dataURL.match(/^data:(.+);base64,(.*)$/);
-  return match ? { mediaType: match[1], base64: match[2] } : null;
-}
-
-function openQuickAddPhoto(){
-  formMainImageData = null;
-  document.getElementById('overlayContent').innerHTML = `
-    <div class="modal-form" style="max-width:420px;">
-      <button class="close-x" onclick="closeForm()">✕</button>
-      <h2>Identifier une œuvre depuis une photo</h2>
-      <div class="sub">Une photo prise en exposition, une reproduction, une capture d'écran... L'IA tente de reconnaître l'œuvre et remplit la fiche automatiquement.</div>
-      <div class="image-zone" id="idPhotoZone" tabindex="0">
-        <div class="zone-text" id="idPhotoZoneText">Cliquez pour choisir un fichier,<br>ou collez une image (Ctrl+V)</div>
-        <input type="file" id="idPhotoFile" accept="image/*" style="display:none">
-      </div>
-      <label style="margin-top:10px;">Indices trouvés (optionnel) — titre, auteur, description...</label>
-      <textarea id="idPhotoHint" maxlength="500" rows="4" style="font-size:12.5px;color:var(--ink);" placeholder="Tout ce qui peut m'aider à identifier la bonne œuvre, même approximatif — et n'hésitez pas à décrire ce que vous voyez, c'est un bon exercice"></textarea>
-      <div id="qaPhotoStatus" style="font-size:12px;color:var(--ink-soft);margin-top:10px;line-height:1.5;"></div>
-      <div class="form-actions">
-        <button class="small-btn ghost" onclick="openQuickAdd()">← Retour</button>
-        <button class="small-btn" id="idPhotoBtn" onclick="identifyFromPhoto()">Identifier</button>
-      </div>
-    </div>
-  `;
-  document.getElementById('overlay').classList.add('open');
-  const zone = document.getElementById('idPhotoZone');
-  zone.addEventListener('click', ()=> document.getElementById('idPhotoFile').click());
-  document.getElementById('idPhotoFile').addEventListener('change', async (e)=>{
-    if(e.target.files[0]){
-      formMainImageData = await fileToDataURL(e.target.files[0]);
-      document.getElementById('idPhotoZoneText').innerHTML = '<img class="zone-preview" src="'+formMainImageData+'"><div>Photo prête — cliquez « Identifier »</div>';
-    }
-  });
-  zone.addEventListener('paste', async (e)=>{
-    const items = (e.clipboardData || window.clipboardData).items;
-    for(const item of items){
-      if(item.type.indexOf('image')===0){
-        formMainImageData = await fileToDataURL(item.getAsFile());
-        document.getElementById('idPhotoZoneText').innerHTML = '<img class="zone-preview" src="'+formMainImageData+'"><div>Photo collée — cliquez « Identifier »</div>';
-      }
-    }
-  });
-}
-
-async function identifyFromPhoto(){
-  const status = document.getElementById('qaPhotoStatus');
-  const btn = document.getElementById('idPhotoBtn');
-  if(!formMainImageData){ status.innerHTML = '<span style="color:var(--accent);">Ajoutez d\'abord une photo.</span>'; return; }
-  const parts = dataURLParts(formMainImageData);
-  if(!parts){ status.innerHTML = '<span style="color:var(--accent);">Image invalide, réessayez.</span>'; return; }
-  btn.disabled = true;
-  status.textContent = 'Identification en cours…';
-  const hint = document.getElementById('idPhotoHint').value.trim();
-  const movementList = movementKeys().join(', ');
-  const prompt = `Tu es un historien de l'art. Regarde cette image, qui montre une œuvre d'art (photo prise en exposition, reproduction, ou capture d'écran). Essaie de l'identifier avec certitude.
-${hint ? `L'utilisateur a trouvé ces indices en ligne (peuvent être partiels, approximatifs, ou eux-mêmes erronés — à vérifier plutôt qu'à recopier tels quels) : "${hint}"\n` : ''}Réponds UNIQUEMENT avec un objet JSON valide, sans backticks ni texte autour, au format exact suivant :
-{
-  "identified": true ou false,
-  "title": "titre de l'œuvre si identifiée avec confiance, chaîne vide sinon",
-  "artist": "nom de l'artiste si identifié avec confiance, chaîne vide sinon",
-  "originalTitle": "titre en langue d'origine si différent, chaîne vide sinon",
-  "museum": "nom du musée, de la galerie, du lieu ou de la collection où l'œuvre se trouve ou est exposée ; utilise \"Collection privée\" si non localisable publiquement",
-  "museumCity": "ville où se trouve l'œuvre, chaîne vide si vraiment inconnue",
-  "museumCountry": "pays où se trouve l'œuvre, chaîne vide si vraiment inconnue",
-  "museumLink": "URL du site officiel du musée/de la collection si connue, chaîne vide sinon",
-  "description": "2-3 phrases présentant l'œuvre",
-  "commissionNote": "une phrase indiquant qui a commandé l'œuvre ou pour quelle occasion/événement elle a été créée, UNIQUEMENT si c'est documenté ; chaîne vide si c'était une simple démarche créative personnelle sans commanditaire ni occasion particulière",
-  "composition": ["premier paragraphe d'analyse (composition/symbolique)", "deuxième paragraphe (contexte historique)", "troisième paragraphe optionnel"],
-  "anecdote": "un fait insolite, peu connu ou surprenant sur cette œuvre précise (1-3 phrases) ; chaîne vide si rien de notable",
-  "artistBio": "biographie complète et développée de l'artiste (8-12 phrases : formation, évolution du style, place dans l'histoire de l'art)",
-  "artistMajorWorks": ["Titre 1 (année)", "Titre 2 (année)", "Titre 3 (année)", "Titre 4 (année, optionnel)", "Titre 5 (année, optionnel)"],
-  "artistAlert": "une ou deux phrases factuelles et neutres UNIQUEMENT si l'artiste a fait l'objet d'accusations largement documentées de violence, d'actes illégaux ou assimilés ; chaîne vide sinon — ne jamais inventer",
-  "artistNationality": "nationalité de l'artiste",
-  "artistBirth": "année de naissance, nombre seul, chaîne vide sinon",
-  "artistDeath": "année de décès, nombre seul, chaîne vide si vivant(e) ou inconnue",
-  "similarArtists": "2-3 noms d'artistes proches séparés par des virgules",
-  "tags": ["3", "4", "mots-cles", "courts"],
-  "technique": "technique et dimensions si connues, chaîne vide sinon",
-  "movements": ["TOUS les courants EXACTS pertinents parmi cette liste (tableau) : ${movementList}. Ne te limite pas à un seul par défaut : identifie chaque courant auquel l'œuvre peut raisonnablement être rattachée (ex. une œuvre post-impressionniste précurseur du fauvisme peut relever des deux à la fois). N'en propose qu'un seul uniquement si les autres ne s'appliquent vraiment pas. Place toujours le courant principal (le plus représentatif de l'œuvre) en premier dans le tableau."],
-  "period": "date ou période de création"
-}
-IMPORTANT : ne mets "identified": true que si tu es raisonnablement confiant. Si tu ne reconnais pas l'œuvre, mets "identified": false et laisse "title" et "artist" vides — n'invente jamais un titre ou un artiste. Le champ "composition" doit être un tableau JSON de chaînes (une chaîne par paragraphe, sans retour à la ligne à l'intérieur d'une chaîne). Réponds en français.`;
-
-  try{
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-6",
-        max_tokens: 1800,
-        messages: [{
-          role: "user",
-          content: [
-            { type: "image", source: { type: "base64", media_type: parts.mediaType, data: parts.base64 } },
-            { type: "text", text: prompt }
-          ]
-        }]
-      })
-    });
-    if(!response.ok){
-      const errText = await response.text();
-      status.innerHTML = '<span style="color:var(--accent);">Erreur API (' + response.status + ') : ' + esc(errText.slice(0,300)) + '</span>';
-      btn.disabled = false;
-      return;
-    }
-    const responseClone = response.clone();
-    let data;
-    try{
-      data = await response.json();
-    }catch(jsonErr){
-      const raw = await responseClone.text().catch(()=>'(corps illisible)');
-      status.innerHTML = '<span style="color:var(--accent);">La réponse du serveur n\'est pas du JSON valide. Contenu brut reçu :<br><span style="font-family:monospace;font-size:10.5px;">' + esc(raw.slice(0,400)) + '</span></span>';
-      btn.disabled = false;
-      return;
-    }
-    const textResp = (data.content || []).filter(b=>b.type==='text').map(b=>b.text).join('\n');
-    const clean = textResp.replace(/```json|```/g,'').trim().replace(/[\r\n]+/g,' ');
-    let result;
-    try{
-      result = JSON.parse(clean);
-    }catch(parseErr){
-      status.innerHTML = '<span style="color:var(--accent);">Réponse imprévue — voici ce qui a été reçu :<br><span style="font-family:monospace;font-size:10.5px;">' + esc(clean.slice(0,400)) + '</span></span>';
-      btn.disabled = false;
-      return;
-    }
-    const compositionText = Array.isArray(result.composition) ? result.composition.join('\n\n') : (result.composition || '');
-    if(result.commissionNote && result.commissionNote.trim()){
-      result.description = (result.description || '').trim() + '\n' + result.commissionNote.trim();
-    }
-    const majorWorksText = Array.isArray(result.artistMajorWorks) ? result.artistMajorWorks.join('\n') : (result.artistMajorWorks || '');
-
-    if(!result.identified || !result.title || !result.artist){
-      status.innerHTML = '<span style="color:var(--accent);">Œuvre inconnue — essayez une photo plus nette ou cadrée sur l\'œuvre seule, ou revenez en arrière pour saisir le titre et l\'artiste manuellement.</span>';
-      btn.disabled = false;
-      return;
-    }
-
-    const dup = findDuplicate(result.title, result.artist);
-    if(dup){
-      status.innerHTML = '<span style="color:var(--accent);">« ' + esc(result.title) + ' » de ' + esc(result.artist) + ' est déjà dans votre carnet (N°' + String(dup.id).padStart(3,'0') + ').</span>';
-      const actions = document.createElement('div');
-      actions.style.cssText = 'display:flex;gap:8px;margin-top:8px;';
-      actions.innerHTML = '<button class="small-btn ghost" id="dupViewBtn2">Voir la fiche existante</button><button class="small-btn ghost" id="dupForceBtn2">Créer quand même</button>';
-      status.appendChild(actions);
-      document.getElementById('dupViewBtn2').onclick = ()=>{ closeForm(); showArtwork(dup.id); };
-      document.getElementById('dupForceBtn2').onclick = ()=> finalizePhotoIdentify(result, compositionText, majorWorksText);
-      btn.disabled = false;
-      return;
-    }
-    await finalizePhotoIdentify(result, compositionText, majorWorksText);
-  }catch(e){
-    console.error('Erreur identification photo', e);
-    const status2 = document.getElementById('qaPhotoStatus');
-    const btn2 = document.getElementById('idPhotoBtn');
-    if(status2) status2.innerHTML = '<span style="color:var(--accent);">Erreur technique : ' + esc((e && e.message) || String(e)) + '</span>';
-    if(btn2) btn2.disabled = false;
-  }
-}
-async function finalizePhotoIdentify(result, compositionText, majorWorksText){
-    const newArtwork = {
-      id: nextId(), additionalImages:[], myNotes:"", dateAdded: new Date().toISOString().slice(0,10),
-      title: result.title, artist: result.artist,
-      originalTitle: result.originalTitle || '',
-      imageUrl: formMainImageData,
-      movements: matchMovements(result.movements).length ? matchMovements(result.movements) : [movementKeys()[0]],
-      period: result.period || '',
-      technique: result.technique || '',
-      description: result.description || '',
-      composition: compositionText,
-      anecdote: result.anecdote || '',
-      tags: Array.isArray(result.tags) ? result.tags : [],
-      similarArtists: result.similarArtists || '',
-      museum: result.museum || '', museumCity: result.museumCity || '', museumCountry: result.museumCountry || '', museumLink: result.museumLink || ''
-    };
-    artworks.push(newArtwork);
-    await saveArtwork(newArtwork);
-    if(result.artist && !getArtist(result.artist)){
-      await saveArtistRecord({
-        name: result.artist, birth: result.artistBirth||'', death: result.artistDeath||'',
-        nationality: result.artistNationality||'', bio: result.artistBio||'', photo:'', instagram:'',
-        majorWorks: majorWorksText||'', alert: result.artistAlert||''
-      });
-    }
-    closeForm();
-    resetHomeScroll();
-    showArtwork(newArtwork.id);
-}
-
-async function quickAddGenerate(){
-  const title = document.getElementById('qa-title').value.trim();
-  const artist = document.getElementById('qa-artist').value.trim();
-  const status = document.getElementById('qaStatus');
-  const btn = document.getElementById('qaGenBtn');
-  if(!title || !artist){ status.innerHTML = '<span style="color:var(--accent);">Renseignez le titre et l\'artiste.</span>'; return; }
-  btn.disabled = true;
-  status.textContent = 'Génération en cours…';
-  try{
-    const result = await callArtAI(title, artist, '', '');
-    const finalTitle = result.correctedTitle || title, finalArtist = result.correctedArtist || artist;
-    const dup = findDuplicate(finalTitle, finalArtist);
-    if(dup){
-      status.innerHTML = '<span style="color:var(--accent);">« ' + esc(finalTitle) + ' » de ' + esc(finalArtist) + ' est déjà dans votre carnet (N°' + String(dup.id).padStart(3,'0') + ').</span>';
-      const actions = document.createElement('div');
-      actions.style.cssText = 'display:flex;gap:8px;margin-top:8px;';
-      actions.innerHTML = '<button class="small-btn ghost" id="dupViewBtn">Voir la fiche existante</button><button class="small-btn ghost" id="dupForceBtn">Créer quand même</button>';
-      status.appendChild(actions);
-      document.getElementById('dupViewBtn').onclick = ()=>{ closeForm(); showArtwork(dup.id); };
-      document.getElementById('dupForceBtn').onclick = ()=> finalizeQuickAdd(result, finalTitle, finalArtist);
-      btn.disabled = false;
-      return;
-    }
-    finalizeQuickAdd(result, finalTitle, finalArtist);
-  }catch(e){
-    console.error('Erreur génération IA', e);
-    status.innerHTML = '<span style="color:var(--accent);">' + esc((e && e.message) || String(e)) + '</span>';
-    btn.disabled = false;
-  }
-}
-async function finalizeQuickAdd(result, finalTitle, finalArtist){
-  try{
-    const newArtwork = {
-      id: nextId(), additionalImages:[], myNotes:"", dateAdded: new Date().toISOString().slice(0,10),
-      title: finalTitle, artist: finalArtist,
-      originalTitle: result.originalTitle || '',
-      imageUrl: '',
-      movements: matchMovements(result.movements).length ? matchMovements(result.movements) : [movementKeys()[0]],
-      period: result.period || '',
-      technique: result.technique || '',
-      description: result.description || '',
-      composition: result.composition || '',
-      anecdote: result.anecdote || '',
-      tags: Array.isArray(result.tags) ? result.tags : [],
-      similarArtists: result.similarArtists || '',
-      museum: result.museum || '', museumCity: result.museumCity || '', museumCountry: result.museumCountry || '', museumLink: result.museumLink || ''
-    };
-    artworks.push(newArtwork);
-    await saveArtwork(newArtwork);
-    if(finalArtist && !getArtist(finalArtist)){
-      await saveArtistRecord({
-        name: finalArtist, birth: result.artistBirth||'', death: result.artistDeath||'',
-        nationality: result.artistNationality||'', bio: result.artistBio||'', photo:'', instagram:'',
-        majorWorks: result.artistMajorWorks||'', alert: result.artistAlert||''
-      });
-    }
-    closeForm();
-    resetHomeScroll();
-    showArtwork(newArtwork.id);
-  }catch(e){
-    console.error('Erreur génération IA', e);
-    const status = document.getElementById('qaStatus');
-    const btn = document.getElementById('qaGenBtn');
-    if(status) status.innerHTML = '<span style="color:var(--accent);">' + esc((e && e.message) || String(e)) + '</span>';
-    if(btn) btn.disabled = false;
-  }
-}
-
-function fillIfEmpty(id, value){
-  const el = document.getElementById(id);
-  if(el && !el.value.trim() && value !== undefined && value !== null && String(value).trim()) el.value = value;
-}
-async function generateWithAI(){
-  const title = document.getElementById('f-title').value.trim();
-  const artist = document.getElementById('f-artist').value.trim();
-  const status = document.getElementById('aiGenStatus');
-  const btn = document.getElementById('aiGenBtn');
-  if(!title || !artist){ status.innerHTML = '<span style="color:var(--accent);">Renseignez au moins le titre et l\'artiste avant de générer.</span>'; return; }
-  const movementVal = [...document.querySelectorAll('.f-movement-cb:checked')].map(cb=>cb.value).join(', ');
-  const periodVal = document.getElementById('f-period').value.trim();
-  btn.disabled = true;
-  status.textContent = 'Génération en cours…';
-  try{
-    const result = await callArtAI(title, artist, movementVal, periodVal);
-    if(result.correctedTitle) document.getElementById('f-title').value = result.correctedTitle;
-    if(result.correctedArtist) document.getElementById('f-artist').value = result.correctedArtist;
-    matchMovements(result.movements).forEach(m => {
-      const cb = document.querySelector('.f-movement-cb[value="'+m+'"]');
-      if(cb) cb.checked = true;
-    });
-    fillIfEmpty('f-description', result.description);
-    fillIfEmpty('f-composition', result.composition);
-    fillIfEmpty('f-similar', result.similarArtists);
-    fillIfEmpty('f-technique', result.technique);
-    fillIfEmpty('f-anecdote', result.anecdote);
-    fillIfEmpty('f-museum', result.museum);
-    fillIfEmpty('f-city', result.museumCity);
-    fillIfEmpty('f-country', result.museumCountry);
-    fillIfEmpty('f-museumlink', result.museumLink);
-    fillIfEmpty('f-originaltitle', result.originalTitle);
-    const finalArtistName = document.getElementById('f-artist').value.trim();
-    if(finalArtistName && !getArtist(finalArtistName)){
-      await saveArtistRecord({
-        name: finalArtistName, birth: result.artistBirth||'', death: result.artistDeath||'',
-        nationality: result.artistNationality||'', bio: result.artistBio||'', photo:'', instagram:'',
-        majorWorks: result.artistMajorWorks||'', alert: result.artistAlert||''
-      });
-    }
-    const tagsField = document.getElementById('f-tags');
-    if(tagsField && !tagsField.value.trim() && Array.isArray(result.tags)) tagsField.value = result.tags.join(', ');
-
-    status.textContent = "Champs complétés (titre/artiste corrigés si besoin) — vérifiez les dates et détails précis avant d'enregistrer.";
-  }catch(e){
-    console.error('Erreur génération IA', e);
-    status.textContent = "Erreur : " + ((e && e.message) || String(e));
-  }
-  btn.disabled = false;
-}
-
 function closeForm(){ document.getElementById('overlay').classList.remove('open'); editingId=null; formMainImageData=null; }
 
 async function submitForm(){
   const title = document.getElementById('f-title').value.trim();
-  const artist = document.getElementById('f-artist').value.trim();
+  const artistSelectVal = document.getElementById('f-artist-select').value;
+  const artist = artistSelectVal === '__new__' ? document.getElementById('f-artist-new').value.trim() : artistSelectVal;
+  const similarSelectVal = document.getElementById('f-similar-select').value;
+  const similarArtists = similarSelectVal === '__new__' ? document.getElementById('f-similar-new').value.trim() : similarSelectVal;
   if(!title || !artist){
     const el = document.getElementById('mainImageZone');
     if(el) el.insertAdjacentHTML('beforebegin', '<div style="color:var(--accent);font-size:12px;margin-bottom:8px;">Le titre et le nom de l\'artiste sont nécessaires.</div>');
     return;
+  }
+  if(similarSelectVal === '__new__' && similarArtists && !getArtist(similarArtists)){
+    await saveArtistRecord({ name: similarArtists, birth:'', death:'', nationality:'', photo:'', instagram:'', bio:'', majorWorks:'', alert:'' });
   }
   const urlField = document.getElementById('f-image').value.trim();
   const data = {
     title, artist,
     originalTitle: document.getElementById('f-originaltitle').value.trim(),
     imageUrl: formMainImageData || urlField,
-    movements: [...document.querySelectorAll('.f-movement-cb:checked')].map(cb=>cb.value),
+    movements: [...document.getElementById('f-movement-select').selectedOptions].map(o=>o.value),
     period: document.getElementById('f-period').value.trim(),
     technique: document.getElementById('f-technique').value.trim(),
     description: document.getElementById('f-description').value.trim(),
     composition: document.getElementById('f-composition').value.trim(),
     anecdote: document.getElementById('f-anecdote').value.trim(),
     tags: document.getElementById('f-tags').value.split(',').map(t=>t.trim()).filter(Boolean),
-    similarArtists: document.getElementById('f-similar').value.trim(),
+    similarArtists,
     museum: document.getElementById('f-museum').value.trim(),
     museumCity: document.getElementById('f-city').value.trim(),
     museumCountry: document.getElementById('f-country').value.trim(),
-    museumLink: document.getElementById('f-museumlink').value.trim(),
   };
   const currentEditingId = editingId;
   if(!currentEditingId){
@@ -2553,6 +2245,7 @@ async function finishSubmitForm(data, editingIdAtSubmit){
 }
 async function deleteArtwork(id){
   showConfirm("Supprimer définitivement cette œuvre de votre carnet ?", async ()=>{
+    const artwork = artworks.find(x=>x.id===id);
     const success = await deleteArtworkStorage(id);
     if(success){
       artworks = artworks.filter(x=>x.id!==id);
