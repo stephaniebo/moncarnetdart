@@ -648,9 +648,8 @@ async function loadArtworks(){
   }
 
   if(keys.length === 0){
-    // Genuinely confirmed empty account — safe to seed the starter collection.
-    artworks = seedData().map(normalizeArtwork);
-    for(const a of artworks){ await saveArtwork(a); }
+    // Genuinely confirmed empty account — no pre-loaded content, a plain shared database for everything you add.
+    artworks = [];
     return;
   }
 
@@ -737,159 +736,6 @@ function findDuplicate(title, artist, excludeId){
 
 function nextId(){ return artworks.reduce((m,a)=>Math.max(m,a.id),0)+1; }
 
-/* ================= SEED DATA: Carnet Louvre ================= */
-function seedData(){
-  const museum = "Musée du Louvre", museumCity = "Paris", museumCountry = "France", museumLink = "https://collections.louvre.fr";
-  const raw = [
-    { title:"La Joconde", originalTitle:"", artist:"Léonard de Vinci", artistBirth:"1452", artistDeath:"1519", artistNationality:"Italienne",
-      artistBio:"Peintre, ingénieur et savant italien de la Haute Renaissance, incarnation de « l'homme universel », connu pour son usage du sfumato et son insatiable curiosité scientifique.",
-      similarArtists:"Raphaël, Le Titien", movement:"Renaissance", period:"1503-1519", technique:"Huile sur peuplier, 77 × 53 cm",
-      description:"Portrait de Lisa Gherardini, épouse d'un marchand florentin, que Léonard a emporté avec lui toute sa vie sans jamais le livrer au commanditaire. C'est aujourd'hui l'œuvre la plus visitée au monde, protégée derrière une vitre blindée dans la Salle des États.\nLe portrait aurait été commandé par Francesco del Giocondo, l'époux du modèle, probablement pour célébrer la naissance de leur second fils.",
-      composition:"Le sourire énigmatique tient en grande partie au sfumato : Léonard estompe les contours (notamment aux coins des lèvres et des yeux) par des glacis successifs si fins que l'œil ne peut fixer une expression précise — elle semble changer selon l'endroit où l'on regarde. Le paysage en arrière-plan, montagneux et brumeux, s'éloigne dans une perspective atmosphérique qui donne une profondeur presque irréelle. La pose en légère torsion, les mains croisées au premier plan, était une nouveauté qui a influencé tout le portrait occidental après elle. Léonard a travaillé cette toile pendant plus de quinze ans, ajoutant des couches de vernis et de glacis jusqu'à sa mort, ce qui explique la subtilité inégalée du modelé.",
-      tags:["Renaissance italienne","portrait","chef-d'œuvre"],
-      anecdote:"Le tableau n'est devenu une star mondiale qu'après son vol en 1911 par un employé italien du Louvre, Vincenzo Peruggia, convaincu qu'il fallait « rendre » l'œuvre à l'Italie. Il resta caché deux ans dans une valise à double fond avant d'être retrouvé à Florence — l'affaire fit une publicité inespérée au tableau, jusque-là apprécié mais pas encore mythique." },
-    { title:"Les Noces de Cana", originalTitle:"Le Nozze di Cana", artist:"Véronèse", artistBirth:"1528", artistDeath:"1588", artistNationality:"Italienne",
-      artistBio:"Peintre vénitien de la Renaissance tardive, maître de la couleur et des grandes compositions monumentales peuplées de dizaines de figures.",
-      similarArtists:"Le Titien, Tintoret", movement:"Renaissance", period:"1563", technique:"Huile sur toile, 6,77 × 9,94 m",
-      description:"La plus grande toile du Louvre, installée face à la Joconde. Elle représente le miracle du Christ changeant l'eau en vin lors d'un mariage, mais Véronèse transpose la scène biblique dans un somptueux banquet vénitien contemporain, avec plus de 130 personnages.\nCommandée par les moines bénédictins du monastère de San Giorgio Maggiore à Venise, pour orner le mur du fond de leur réfectoire.",
-      composition:"La composition organise le tumulte du banquet en plusieurs plans clairs : les musiciens au premier plan (où Véronèse s'est représenté lui-même en habit blanc jouant de la viole), les convives autour de la table en arc de cercle, et une architecture antique monumentale qui structure tout l'espace en arrière-plan. Le Christ, minuscule au centre exact de la toile, se perd presque dans la foule — un choix délibéré qui fait du miracle un détail parmi la profusion du festin plutôt que le sujet unique. Les couleurs, d'une richesse chromatique typiquement vénitienne, et les riches étoffes témoignent du faste de la République de Venise à son apogée.",
-      tags:["Venise","grand format","banquet"] },
-    { title:"Saint Jean-Baptiste", originalTitle:"", artist:"Léonard de Vinci", artistBirth:"1452", artistDeath:"1519", artistNationality:"Italienne",
-      artistBio:"Voir la Joconde : Léonard de Vinci, l'un des plus grands esprits de la Renaissance italienne.",
-      similarArtists:"Raphaël", movement:"Renaissance", period:"~1513-1516", technique:"Huile sur bois, 69 × 57 cm",
-      description:"Dernière œuvre peinte par Léonard, représentant saint Jean-Baptiste émergeant de l'obscurité, le doigt levé vers le ciel — un geste qui deviendra une signature visuelle du peintre.",
-      composition:"Le fond est plongé dans un noir presque total, sans décor ni paysage, ce qui concentre toute l'attention sur le visage et le geste. Le sfumato, ici poussé à son maximum, dissout les contours du corps dans l'obscurité au point que la silhouette semble se matérialiser progressivement à partir de l'ombre. Le sourire ambigu, très proche de celui de la Joconde, et l'androgynie du visage ont beaucoup fait débat : cette figure semble autant angélique que sensuelle, brouillant volontairement les frontières entre sacré et profane qui caractérisent la pensée tardive de Léonard.",
-      tags:["Léonard de Vinci","clair-obscur","dernière œuvre"] },
-    { title:"La Vierge aux rochers", originalTitle:"", artist:"Léonard de Vinci", artistBirth:"1452", artistDeath:"1519", artistNationality:"Italienne",
-      artistBio:"Voir la Joconde : Léonard de Vinci, l'un des plus grands esprits de la Renaissance italienne.",
-      similarArtists:"Raphaël", movement:"Renaissance", period:"~1483-1486", technique:"Huile sur bois transposée sur toile, 199 × 122 cm",
-      description:"La Vierge, l'Enfant Jésus, saint Jean-Baptiste enfant et un ange sont réunis dans un décor rocheux fantastique, sujet que Léonard reprendra dans une seconde version conservée à la National Gallery de Londres.\nCommandée par la Confrérie de l'Immaculée Conception de Milan comme retable central pour la chapelle de leur église.",
-      composition:"La composition en pyramide, avec la tête de la Vierge au sommet, était une innovation qui deviendra un standard de la Renaissance. Le décor de grotte rocheuse, peuplé de formations géologiques improbables mais peintes avec une précision scientifique typique de la curiosité de Léonard pour la géologie, crée une atmosphère mystérieuse et presque primitive, comme un jardin d'Éden minéral. La lumière, diffuse et enveloppante, module doucement les volumes des visages et des mains sans jamais créer d'ombre dure — c'est l'un des exemples les plus aboutis du sfumato appliqué à une scène de groupe complexe.",
-      tags:["Léonard de Vinci","composition pyramidale"] },
-    { title:"La Belle Jardinière", originalTitle:"", artist:"Raphaël", artistBirth:"1483", artistDeath:"1520", artistNationality:"Italienne",
-      artistBio:"Peintre de la Haute Renaissance, avec Léonard et Michel-Ange l'un des trois grands maîtres de la période, réputé pour l'harmonie et la douceur idéalisée de ses compositions.",
-      similarArtists:"Léonard de Vinci, Le Pérugin", movement:"Renaissance", period:"1507", technique:"Huile sur bois, 122 × 80 cm",
-      description:"La Vierge assise dans un paysage champêtre avec l'Enfant Jésus et le jeune saint Jean-Baptiste — un des sujets favoris de Raphaël, traité ici avec une grâce et une tendresse devenues emblématiques de son style.",
-      composition:"La composition triangulaire, héritée directement de Léonard, place la tête de la Vierge au sommet et les deux enfants aux angles de base, créant un équilibre parfaitement stable et apaisant. Le regard tendre échangé entre la mère et l'enfant, les carnations douces et le paysage toscan idéalisé en arrière-plan incarnent l'idéal classique de beauté harmonieuse propre à Raphaël, plus lisse et sereine que le mystère plus trouble de Léonard. Cette toile a été si admirée qu'elle a donné son nom au style « belle manière » associé à Raphaël pendant des siècles.",
-      tags:["Raphaël","Vierge à l'Enfant","harmonie"] },
-
-    { title:"Le Radeau de la Méduse", originalTitle:"", artist:"Théodore Géricault", artistBirth:"1791", artistDeath:"1824", artistNationality:"Française",
-      artistBio:"Peintre français, figure précoce du romantisme, mort à 32 ans, connu pour son engagement dans des sujets d'actualité tragique et son intérêt clinique pour l'anatomie.",
-      similarArtists:"Eugène Delacroix", movement:"Romantisme", period:"1818-1819", technique:"Huile sur toile, 4,91 × 7,16 m",
-      description:"Le naufrage réel de la frégate La Méduse en 1816, dû à l'incompétence d'un capitaine nommé par faveur royale, qui a abandonné 150 passagers sur un radeau de fortune. Seuls 15 ont survécu après treize jours d'errance, de famine et de cannibalisme. Un immense scandale politique à l'époque.",
-      composition:"La composition suit une double diagonale ascendante : celle des corps, des morts à gauche vers les vivants qui se redressent à droite, et celle, croisée, du mât qui structure toute la scène. L'œil est ainsi guidé vers le sommet du groupe, où un homme agite un tissu vers un navire à peine visible à l'horizon — le signal d'espoir. Géricault a interrogé des survivants, fait construire une réplique du radeau dans son atelier et étudié des cadavres en morgue pour la véracité anatomique des corps, dans un souci de vérité clinique rare pour l'époque. Le clair-obscur dramatique, hérité du Caravage, et la palette de tons terreux et livides accentuent l'atmosphère de mort et de désespoir, tandis que la tension entre l'immensité de la mer et l'exiguïté du radeau écrase visuellement les naufragés.",
-      tags:["Louvre","drame","composition","à étudier"],
-      anecdote:"Géricault a fait raser sa tête pour s'obliger à rester enfermé dans son atelier pendant des mois, et a fait installer des cadavres et morceaux de corps provenant de la morgue et d'un hôpital psychiatrique pour étudier la décomposition de la chair au naturel." },
-    { title:"La Liberté guidant le peuple", originalTitle:"", artist:"Eugène Delacroix", artistBirth:"1798", artistDeath:"1863", artistNationality:"Française",
-      artistBio:"Chef de file du romantisme français, connu pour sa fougue coloriste et son engagement dans des sujets historiques et contemporains chargés d'émotion.",
-      similarArtists:"Théodore Géricault", movement:"Romantisme", period:"1830", technique:"Huile sur toile, 2,60 × 3,25 m",
-      description:"Peint immédiatement après les Trois Glorieuses de juillet 1830, ce tableau immortalise l'insurrection parisienne qui renversa Charles X. La Liberté, allégorie féminine aux seins nus coiffée du bonnet phrygien, mène le peuple par-dessus les barricades, drapeau tricolore à la main.\nCe n'est pas une commande : Delacroix peint spontanément ce tableau pour commémorer les événements auxquels il venait d'assister, puis le propose lui-même au nouveau gouvernement de Louis-Philippe.",
-      composition:"La composition s'organise en triangle héroïque, la Liberté au sommet, entourée de figures représentant différentes classes sociales unies dans le même élan : le gamin de Paris armé de pistolets (qui inspirera Gavroche à Victor Hugo), le bourgeois en haut-de-forme, l'ouvrier torse nu. Cette union des classes dans un même mouvement révolutionnaire est le message politique central du tableau. La fumée des combats et la lumière crue qui éclaire la Liberté par-derrière lui donnent une dimension presque surnaturelle, entre allégorie antique et femme du peuple bien réelle — un mélange de réalisme cru (les cadavres au premier plan) et d'idéalisation qui est la marque du romantisme delacroisien.",
-      tags:["révolution","allégorie","couleur"] },
-    { title:"Scènes des massacres de Scio", originalTitle:"", artist:"Eugène Delacroix", artistBirth:"1798", artistDeath:"1863", artistNationality:"Française",
-      artistBio:"Chef de file du romantisme français, connu pour sa fougue coloriste et son engagement dans des sujets historiques et contemporains chargés d'émotion.",
-      similarArtists:"Théodore Géricault", movement:"Romantisme", period:"1824", technique:"Huile sur toile, 4,19 × 3,54 m",
-      description:"Un massacre réel commis par les troupes ottomanes contre la population grecque de l'île de Chios en 1822, pendant la guerre d'indépendance grecque — des dizaines de milliers de civils tués ou déportés.\nSans commande, Delacroix peint ce tableau en réaction directe aux nouvelles du massacre, dans un contexte où l'opinion publique européenne s'enflammait pour la cause grecque.",
-      composition:"Contrairement au triangle héroïque de la Liberté guidant le peuple, la composition est ici éclatée, sans centre stable : les groupes de victimes sont dispersés dans le désordre, sans figure guidant l'œil vers un message d'espoir. Le cheval du cavalier ottoman à droite, cabré et menaçant, contraste avec les corps résignés et épuisés au premier plan, opposant la violence active à la souffrance passive. Le paysage désolé en arrière-plan, sans végétation, renforce visuellement l'idée de dévastation totale. Delacroix travaille une palette de couleurs volontairement dissonantes et criardes plutôt qu'harmonieuses, un choix qui a choqué la critique de l'époque habituée à des scènes de bataille esthétiquement plus « propres ». L'opinion publique européenne, très sensible à la cause grecque (Lord Byron y est mort en 1824), fut profondément marquée par cette toile.",
-      tags:["massacre","engagement politique","couleur dissonante"] },
-    { title:"La Mort de Sardanapale", originalTitle:"", artist:"Eugène Delacroix", artistBirth:"1798", artistDeath:"1863", artistNationality:"Française",
-      artistBio:"Chef de file du romantisme français, connu pour sa fougue coloriste et son engagement dans des sujets historiques et contemporains chargés d'émotion.",
-      similarArtists:"Théodore Géricault", movement:"Romantisme", period:"1827", technique:"Huile sur toile, 3,92 × 4,96 m",
-      description:"Un roi assyrien légendaire, largement fictif et inspiré d'une pièce de Lord Byron, qui, assiégé et vaincu, ordonne la destruction de tous ses biens, de ses chevaux et de ses concubines avant de se suicider lui-même sur son lit, pour ne rien laisser à ses ennemis.",
-      composition:"La composition suit une diagonale descendante extrême, du roi allongé en haut à gauche jusqu'au chaos de corps et d'objets détruits en bas à droite — l'œil dévale littéralement vers le désastre, à l'inverse de la diagonale montante et pleine d'espoir du Radeau de la Méduse. Le rouge domine toute la toile (lit, tissus, sang) comme une couleur de destruction totale et de pulsion de mort assumée. Le roi lui-même reste étrangement passif et détaché au milieu du carnage qu'il a ordonné, un contraste dérangeant entre son calme et la violence extrême qui l'entoure. Considérée en son temps comme scandaleuse et incompréhensible, la critique l'ayant détestée, elle est aujourd'hui vue comme l'un des sommets absolus du romantisme français : l'exploration ultime de la démesure et du fantasme oriental.",
-      tags:["démesure","rouge","scandale"] },
-    { title:"La Grande Odalisque", originalTitle:"", artist:"Jean-Auguste-Dominique Ingres", artistBirth:"1780", artistDeath:"1867", artistNationality:"Française",
-      artistBio:"Peintre français, chef de file de la peinture néoclassique académique, rival stylistique de Delacroix, réputé pour la perfection linéaire de son dessin.",
-      similarArtists:"Jacques-Louis David", movement:"Néoclassicisme", period:"1814", technique:"Huile sur toile, 91 × 162 cm",
-      description:"Une odalisque (femme d'un harem ottoman) allongée, nue, vue de dos, dans un décor orientaliste de fantaisie. Ingres n'a jamais mis les pieds en Orient : la scène est une pure invention exotique destinée à un public européen.\nCommandée par Caroline Murat, reine de Naples et sœur de Napoléon, comme pendant à un autre tableau qu'elle possédait déjà.",
-      composition:"Ingres est célèbre pour avoir allongé délibérément la colonne vertébrale du modèle de plusieurs vertèbres par rapport à l'anatomie réelle, un choix qui a scandalisé la critique de l'époque (« trois vertèbres de trop », disait-on) mais qui répond à une logique purement esthétique : créer une ligne continue et sinueuse du dos aux hanches, plus importante pour Ingres que l'exactitude anatomique. Les étoffes richement travaillées, le turban, l'éventail en plumes de paon et le narguilé en arrière-plan construisent un Orient fantasmé, sensuel et décoratif, caractéristique de l'orientalisme naissant en peinture. Le contraste entre la froideur du dessin, d'une précision presque glacée, et la sensualité du sujet est ce qui rend cette toile si singulière dans l'œuvre du peintre.",
-      tags:["orientalisme","ligne","nu"],
-      anecdote:"En comptant les vertèbres visibles dans le dos, les critiques de l'époque ont calculé qu'Ingres en avait ajouté environ trois de trop par rapport à une anatomie réelle — un « défaut » assumé, puisqu'il cherchait une ligne continue et sinueuse plutôt que l'exactitude anatomique." },
-    { title:"Le Sacre de Napoléon", originalTitle:"", artist:"Jacques-Louis David", artistBirth:"1748", artistDeath:"1825", artistNationality:"Française",
-      artistBio:"Peintre officiel de la Révolution puis de l'Empire, chef de file du néoclassicisme français, maître de Gros et d'Ingres.",
-      similarArtists:"Antoine-Jean Gros, Ingres", movement:"Néoclassicisme", period:"1806-1807", technique:"Huile sur toile, 6,21 × 9,79 m",
-      description:"Le couronnement de Napoléon Ier à Notre-Dame de Paris en 1804. Fait rare et calculé : Napoléon se couronne lui-même plutôt que d'être couronné par le pape, puis s'apprête à couronner à son tour l'impératrice Joséphine, agenouillée devant lui.\nCommandé directement par Napoléon pour immortaliser son propre couronnement et légitimer visuellement son nouveau pouvoir impérial.",
-      composition:"David réorganise délibérément la réalité historique pour la mettre en scène : le pape Pie VII, réduit à un rôle passif, est assis en retrait alors qu'il présidait en réalité la cérémonie ; la mère de Napoléon, absente le jour J en raison d'une brouille familiale, est ajoutée bien en évidence au centre de la tribune. Cette manipulation calculée de la vérité historique fait de ce tableau un document de propagande impériale autant qu'une œuvre d'art. La composition, d'une précision quasi photographique dans le rendu des étoffes, des bijoux et des visages (plus de 150 portraits identifiables), et l'immensité du format, transforment l'ensemble en spectacle de pouvoir absolu.",
-      tags:["propagande","Napoléon","grand format"] },
-    { title:"La Bataille d'Eylau", originalTitle:"", artist:"Antoine-Jean Gros", artistBirth:"1771", artistDeath:"1835", artistNationality:"Française",
-      artistBio:"Élève de David, peintre de bataille officiel de Napoléon, considéré comme un pont entre le néoclassicisme de son maître et le romantisme naissant.",
-      similarArtists:"Jacques-Louis David, Théodore Géricault", movement:"Romantisme", period:"1808", technique:"Huile sur toile, 5,21 × 7,84 m",
-      description:"Napoléon visitant le champ de bataille d'Eylau en 1807 au lendemain d'un carnage effroyable, l'une des batailles les plus meurtrières de l'Empire, presque une défaite déguisée en victoire. Napoléon y est montré en empereur « miséricordieux », regardant avec compassion les blessés et les morts.\nRéalisé pour un concours organisé par l'administration impériale afin de trouver la meilleure représentation de la bataille, que Gros remporta.",
-      composition:"Une composition en cercle chaotique s'organise autour de Napoléon, immobile au centre : tout tourne autour de lui pendant que le désastre se déploie alentour, un contraste calculé entre son calme et l'horreur environnante. Le ciel jaune-gris et glacial écrase toute la scène d'une lumière froide qui accentue le sentiment de mort et d'hiver. Un soldat blessé lève les bras vers Napoléon dans un geste presque christique de supplication, l'empereur y est mis en scène comme une figure quasi salvatrice au milieu du chaos qu'il a lui-même provoqué. Gros peint des centaines de figures avec un souci glaçant du détail réaliste (cadavres, chevaux morts, neige tachée de sang), un réalisme cru rare pour une commande officielle de l'Empire, qui annonce déjà Géricault et Delacroix.",
-      tags:["bataille","propagande","transition romantisme"] },
-    { title:"Le Serment des Horaces", originalTitle:"", artist:"Jacques-Louis David", artistBirth:"1748", artistDeath:"1825", artistNationality:"Française",
-      artistBio:"Peintre officiel de la Révolution puis de l'Empire, chef de file du néoclassicisme français.",
-      similarArtists:"Antoine-Jean Gros, Ingres", movement:"Néoclassicisme", period:"1784", technique:"Huile sur toile, 3,30 × 4,25 m",
-      description:"Un épisode légendaire de la Rome antique : trois frères Horaces jurent à leur père de vaincre ou mourir pour Rome, tandis que leurs sœurs, dont l'une est fiancée à un ennemi, s'effondrent de douleur à droite.\nCommandé par la Direction des Bâtiments du roi Louis XVI pour le Salon officiel de peinture de 1785.",
-      composition:"La composition est d'une clarté géométrique presque didactique : trois arcades en arrière-plan répondent aux trois groupes de personnages (le père et les épées, les fils qui jurent, les femmes éplorées), une rigueur qui tranche radicalement avec les courbes sensuelles du rococo alors dominant. Les lignes verticales et horizontales strictes, l'absence de fioritures décoratives et les couleurs sobres incarnent un idéal de vertu civique, de sacrifice et de rigueur morale directement inspiré de l'Antiquité romaine. Peint cinq ans avant la Révolution française, ce tableau est devenu un manifeste visuel des valeurs républicaines de devoir et d'abnégation, avant même que la Révolution n'éclate.",
-      tags:["manifeste néoclassique","vertu civique","géométrie"] },
-    { title:"Les Sabines", originalTitle:"L'Intervention des Sabines", artist:"Jacques-Louis David", artistBirth:"1748", artistDeath:"1825", artistNationality:"Française",
-      artistBio:"Peintre officiel de la Révolution puis de l'Empire, chef de file du néoclassicisme français.",
-      similarArtists:"Antoine-Jean Gros, Ingres", movement:"Néoclassicisme", period:"1799", technique:"Huile sur toile, 3,85 × 5,22 m",
-      description:"La légende romaine des Sabines, enlevées de force par les Romains, qui se jettent des années plus tard entre leurs pères sabins et leurs maris romains pour arrêter la bataille qui les oppose.",
-      composition:"Hersilie, au centre exact de la composition, écarte physiquement les bras des deux combattants (son père et son mari), créant un axe de paix qui coupe littéralement la toile en deux camps. David peint volontairement les guerriers nus à l'antique, un choix esthétique justifié par son admiration pour la sculpture grecque, qui accentue la théâtralité presque sculpturale de la scène. Peinte après les violences de la Terreur révolutionnaire, cette toile porte un message explicite de réconciliation nationale : David souhaitait que les Français, comme les Sabines, mettent fin à leurs déchirements internes.",
-      tags:["réconciliation","Antiquité romaine","David"] },
-    { title:"Portrait de Madeleine", originalTitle:"", artist:"Marie-Guillemine Benoist", artistBirth:"1768", artistDeath:"1826", artistNationality:"Française",
-      artistBio:"Peintre française formée dans l'atelier de David, l'une des rares femmes peintres reconnues de son époque, à qui l'accès aux grands sujets historiques était largement fermé.",
-      similarArtists:"Jacques-Louis David", movement:"Néoclassicisme", period:"1800", technique:"Huile sur toile",
-      description:"Portrait d'une femme noire, probablement domestique de la belle-sœur de l'artiste, peu après la première abolition de l'esclavage en France (1794). Un sein dénudé à l'antique, dans la tradition du portrait néoclassique, mais le modèle choisi était radicalement inhabituel pour l'époque.",
-      composition:"La sobriété du fond neutre et le drapé blanc antique concentrent toute l'attention sur le visage et le regard direct du modèle, qui fixe le spectateur avec une dignité calme plutôt qu'un rôle secondaire ou exotisé comme c'était l'usage dans la peinture de l'époque. Ce choix de composition dépouillée, presque frontale, confère au modèle une présence individuelle rare pour une femme noire peinte à cette période. Réalisé par une femme peintre dans un contexte où l'esclavage venait d'être rétabli par Napoléon quelques années plus tard (1802), ce portrait est aujourd'hui lu comme une œuvre chargée d'une portée historique et politique bien au-delà de ses qualités picturales.",
-      tags:["portrait","femme peintre","histoire"] },
-
-    { title:"Vénus de Milo", originalTitle:"Aphrodite de Milos", artist:"Sculpteur inconnu", artistBirth:"", artistDeath:"", artistNationality:"Grecque (antique)",
-      artistBio:"L'identité du sculpteur reste débattue ; l'œuvre est parfois rapprochée du style d'Alexandros d'Antioche, mais aucune attribution certaine n'a été établie.",
-      similarArtists:"", movement:"Antiquité", period:"~130-100 av. J.-C.", technique:"Marbre, hauteur 2,02 m",
-      description:"Découverte en 1820 sur l'île de Milos, cette statue de la déesse de l'amour est devenue l'un des symboles absolus de la beauté antique, malgré (ou grâce à) l'absence de ses bras, perdus au moment de sa découverte.",
-      composition:"La statue adopte le contrapposto, cette torsion du corps sur une hanche qui répartit le poids de façon asymétrique et donne à la pose une élégance naturelle et vivante, typique de l'héritage classique grec réinterprété à l'époque hellénistique. Le drapé, qui glisse sur les hanches en un équilibre presque instable, crée un contraste voluptueux entre le tissu lourdement sculpté et la peau nue du torse. L'absence des bras, loin d'être perçue comme un manque, a paradoxalement renforcé le mystère et l'aura de la statue : les tentatives de reconstitution du XIXe siècle (tenant une pomme, un miroir ou un bouclier) ont toutes été abandonnées, l'œuvre étant désormais exposée telle quelle.",
-      tags:["Antiquité grecque","sculpture","idéal de beauté"] },
-    { title:"Diane de Versailles", originalTitle:"Diane à la biche", artist:"D'après Léocharès (copie romaine)", artistBirth:"", artistDeath:"", artistNationality:"Grecque (original) / Romaine (copie)",
-      artistBio:"Copie romaine en marbre d'un original grec en bronze attribué au sculpteur Léocharès, actif au IVe siècle avant J.-C.",
-      similarArtists:"Praxitèle", movement:"Antiquité", period:"Copie du IIe siècle apr. J.-C., d'après un original du IVe siècle av. J.-C.", technique:"Marbre, hauteur 2,11 m",
-      description:"La déesse de la chasse Diane (Artémis chez les Grecs), représentée en mouvement aux côtés d'une biche, qu'elle semble sur le point de chasser ou de protéger. Offerte à Henri II au XVIe siècle, elle a longtemps orné les jardins royaux avant d'entrer au Louvre.",
-      composition:"Le corps en léger déhanché et le bras tendu vers le carquois sur son épaule créent une diagonale dynamique qui traverse toute la sculpture, donnant une impression de mouvement suspendu, comme si la déesse venait tout juste de s'arrêter en pleine course. La biche à ses côtés, fidèle et vive, sert de point d'appui visuel qui équilibre la composition tout en rappelant le domaine de la chasse propre à la déesse. Cette copie romaine témoigne de l'immense popularité des modèles grecs classiques dans l'Empire romain, qui a multiplié les répliques en marbre d'originaux grecs en bronze aujourd'hui perdus.",
-      tags:["Diane","chasse","copie romaine"] },
-    { title:"Hermaphrodite endormi", originalTitle:"Hermaphrodite endormi (Borghèse)", artist:"D'après un original hellénistique (copie romaine)", artistBirth:"", artistDeath:"", artistNationality:"Grecque (original) / Romaine (copie)",
-      artistBio:"Sculpteur original inconnu ; le matelas de marbre sur lequel repose la statue a été ajouté au XVIIe siècle par le sculpteur baroque italien Gian Lorenzo Bernini.",
-      similarArtists:"Praxitèle", movement:"Antiquité", period:"Copie romaine du IIe siècle apr. J.-C., d'après un original hellénistique", technique:"Marbre, longueur 1,48 m",
-      description:"Une figure allongée et endormie qui, vue d'un côté, présente une silhouette féminine, et de l'autre, révèle des attributs masculins : Hermaphrodite, enfant d'Hermès et d'Aphrodite dans la mythologie grecque, fusion des deux sexes en un seul corps.",
-      composition:"Le jeu de composition repose entièrement sur le point de vue du spectateur : approché par le dos, le corps semble être celui d'une femme endormie aux courbes classiques ; ce n'est qu'en contournant la sculpture que la surprise anatomique se révèle, créant un effet de mise en scène que les Grecs hellénistiques affectionnaient particulièrement, jouant avec l'attente et la perception du regardeur. Le matelas sur lequel repose la figure, ajouté bien plus tard par Bernin, accentue par son mœlleux sculpté avec un réalisme saisissant le contraste entre la dureté du marbre et l'illusion de chair endormie et détendue.",
-      tags:["mythologie","hellénistique","point de vue"] },
-    { title:"Victoire de Samothrace", originalTitle:"Niké de Samothrace", artist:"Sculpteur inconnu", artistBirth:"", artistDeath:"", artistNationality:"Grecque (antique)",
-      artistBio:"L'identité du sculpteur reste inconnue ; l'œuvre est datée de la période hellénistique par son style dynamique et son traitement virtuose du drapé.",
-      similarArtists:"", movement:"Antiquité", period:"~190 av. J.-C.", technique:"Marbre, hauteur 2,75 m (avec la proue, environ 5,57 m)", 
-      description:"La déesse ailée de la Victoire, représentée au moment où elle se pose sur la proue d'un navire de guerre, en commémoration d'une bataille navale. Découverte en 1863 sur l'île de Samothrace, elle est aujourd'hui installée en haut de l'escalier Daru, l'un des points culminants de la visite du Louvre.",
-      composition:"Le drapé spectaculairement sculpté, qui semble plaqué contre le corps par le vent et la vitesse tout en se déployant en volutes derrière elle, est l'une des prouesses techniques les plus admirées de toute la sculpture antique : le marbre donne l'illusion d'un tissu léger et mouillé, presque transparent par endroits, en même temps qu'il capture le mouvement en train de se figer. Les ailes déployées et le buste projeté vers l'avant créent une diagonale puissante qui traverse toute la composition, donnant une sensation de vitesse et d'élan malgré l'immobilité du matériau. Bien que la tête et les bras manquent, l'œuvre est considérée comme l'un des sommets absolus de l'art hellénistique pour sa capacité à rendre le mouvement et le vent dans la pierre.",
-      tags:["mouvement","drapé","hellénistique"],
-      anecdote:"À sa découverte en 1863, la statue n'avait qu'une seule aile : l'autre a été reconstituée en plâtre au XIXe siècle pour rétablir la symétrie. La tête et les bras, eux, n'ont jamais été retrouvés — une main a été localisée bien plus tard, en 1950, et est aujourd'hui exposée séparément, à quelques mètres de la statue." },
-    { title:"Les Esclaves", originalTitle:"L'Esclave mourant et l'Esclave rebelle", artist:"Michel-Ange", artistBirth:"1475", artistDeath:"1564", artistNationality:"Italienne",
-      artistBio:"Sculpteur, peintre et architecte florentin, l'une des figures majeures de la Haute Renaissance, réputé pour sa maîtrise du marbre et sa conception de la sculpture comme libération d'une forme déjà présente dans la pierre.",
-      similarArtists:"Léonard de Vinci, Raphaël", movement:"Renaissance", period:"1513-1516", technique:"Marbre, chacun environ 2,09-2,15 m", 
-      description:"Deux figures masculines inachevées, conçues à l'origine pour orner le tombeau monumental du pape Jules II, projet jamais réalisé dans son ampleur initiale. L'une se débat contre ses liens, l'autre semble s'abandonner dans un sommeil proche de la mort.\nCommandées par les héritiers du pape Jules II pour orner son tombeau monumental, un projet finalement réduit à une version beaucoup plus modeste que prévu.",
-      composition:"Michel-Ange concevait la sculpture comme un acte de libération d'une figure déjà présente dans le bloc de marbre, et ces deux œuvres, restées partiellement inachevées, rendent ce processus visible : certaines parties du corps émergent poncées et lisses, d'autres restent à l'état brut, encore marquées par les outils. L'Esclave rebelle, musculature tendue et visage tourné dans un effort de résistance, contraste avec l'Esclave mourant, dont le corps s'affaisse dans un abandon presque érotique, la tête renversée en arrière. Cette opposition entre lutte et reddition a été lue comme une méditation sur la condition humaine face à la mort, bien au-delà de leur fonction décorative initiale sur un tombeau.",
-      tags:["Michel-Ange","inachevé","marbre"] },
-    { title:"Psyché ranimée par le baiser de l'Amour", originalTitle:"", artist:"Antonio Canova", artistBirth:"1757", artistDeath:"1822", artistNationality:"Italienne",
-      artistBio:"Sculpteur italien, figure centrale du néoclassicisme européen, réputé pour la perfection lisse et l'idéalisation de ses marbres.",
-      similarArtists:"Jacques-Louis David", movement:"Néoclassicisme", period:"1787-1793", technique:"Marbre, hauteur 1,55 m",
-      description:"Le mythe de Psyché et de l'Amour (Cupidon) : plongée dans un sommeil mortel après avoir désobéi à un interdit, Psyché est ranimée par le baiser de l'Amour venu la sauver. Considérée comme l'un des chefs-d'œuvre absolus de la sculpture néoclassique.\nCommandée par le colonel écossais John Campbell, qui découvrit l'œuvre inachevée dans l'atelier de Canova et insista pour l'acquérir.",
-      composition:"La composition en X, formée par les ailes déployées de l'Amour et les bras des deux amants qui s'enlacent, crée un mouvement circulaire qui capture l'instant précis du réveil, entre l'abandon du sommeil et l'éveil du geste. Canova travaille le marbre avec une virtuosité technique extrême : la peau semble presque tiède et souple malgré la dureté de la pierre, un effet obtenu par un polissage minutieux qui gomme toute trace d'outil. Le contraste entre la légèreté aérienne du groupe, qui semble presque en suspension, et le poids réel du marbre est l'une des prouesses les plus admirées de toute la sculpture occidentale, faisant de cette œuvre un sommet absolu du raffinement néoclassique.",
-      tags:["mythologie","Canova","marbre"] },
-
-    { title:"Le Cycle de Marie de Médicis", originalTitle:"", artist:"Pierre Paul Rubens", artistBirth:"1577", artistDeath:"1640", artistNationality:"Flamande",
-      artistBio:"Peintre flamand, l'un des plus grands maîtres baroques européens, réputé pour ses compositions dynamiques et sa maîtrise inégalée de la couleur et du mouvement.",
-      similarArtists:"", movement:"Baroque", period:"1622-1625", technique:"24 toiles, huile sur toile, certaines dépassant 4 × 7 m",
-      description:"La vie de Marie de Médicis, reine de France, racontée en 24 épisodes monumentaux (naissance, mariage avec Henri IV, régence, conflits avec son fils Louis XIII), traitée non comme un simple récit historique mais comme un mythe quasi divin. Exposé dans la Galerie Médicis, aile Richelieu.\nCommandé par Marie de Médicis elle-même pour glorifier sa propre vie et asseoir sa légitimité politique, à une époque où son autorité était contestée.",
-      composition:"Chaque scène historique réelle est mêlée à des figures mythologiques (dieux grecs, allégories, créatures fantastiques) qui commentent et sublimisent l'événement : la naissance de Marie de Médicis est entourée des trois Grâces et de figures allégoriques du Destin, son débarquement en France est accompagné de Neptune et de sirènes qui célèbrent son arrivée comme un événement cosmique. Rubens transforme systématiquement une reine française politiquement controversée en héroïne mythologique intemporelle, de la propagande visuelle du plus haut niveau, mais d'une inventivité symbolique inégalée. Rubens peint avec une énergie et un mouvement permanents, corps en torsion, drapés qui volent, une maîtrise de la couleur et de la lumière qui influencera des générations de peintres après lui, dont Delacroix. C'est le plus grand cycle décoratif jamais réalisé par un seul peintre pour un client unique, conservé quasi intact dans sa présentation d'origine.",
-      tags:["Rubens","cycle monumental","mythologie politique"] }
-  ];
-  return raw.map((r,i) => ({
-    id: i+1,
-    imageUrl:"", additionalImages:[],
-    artistPhoto:"", artistInstagram:"",
-    museum, museumCity, museumCountry, museumLink,
-    myNotes:"", dateAdded:"2026-08-19",
-    ...r
-  }));
-}
 
 /* ================= HELPERS ================= */
 function openImageZoom(src){
@@ -1139,21 +985,6 @@ function showConfirm(message, onYes){
     </div>`;
   document.getElementById('overlay').classList.add('open');
   document.getElementById('confirmYesBtn').addEventListener('click', async ()=>{ closeForm(); await onYes(); });
-}
-
-async function importLouvreSeed(){
-  const toImport = seedData();
-  const existingTitles = new Set(artworks.map(a=>a.title.trim().toLowerCase()));
-  const newOnes = toImport.filter(a => !existingTitles.has(a.title.trim().toLowerCase()));
-  if(newOnes.length === 0){ showAlert("Toutes les œuvres du carnet Louvre sont déjà dans votre galerie."); return; }
-  showConfirm(`Ajouter ${newOnes.length} œuvre(s) du carnet Louvre à votre galerie actuelle ?`, async ()=>{
-    let id = nextId();
-    for(const a of newOnes){ a.id = id++; }
-    artworks = artworks.concat(newOnes);
-    for(const a of newOnes){ await saveArtwork(a); }
-    resetHomeScroll();
-    goHome();
-  });
 }
 
 /* ================= ROUTER ================= */
@@ -2272,7 +2103,7 @@ async function finishSubmitForm(data, editingIdAtSubmit){
     await saveArtwork(updated);
   }
   closeForm();
-  if(editingIdAtSubmit){ showArtwork(editingIdAtSubmit); } else { homeFilter={type:null,value:null}; goHome(); }
+  showArtwork(updated.id);
 }
 async function deleteArtwork(id){
   showConfirm("Supprimer définitivement cette œuvre de votre carnet ?", async ()=>{
