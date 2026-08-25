@@ -410,6 +410,8 @@ let homeFilter = { type:null, value:null };
 let detailContext = { type:null, value:null };
 let browseHistory = [];
 let homeShuffleIds = null;
+let gallerySearchOpen = false;
+let gallerySearchQuery = '';
 
 /* ================= STORAGE WRAPPER (hard timeout so a hanging call can never freeze the app) ================= */
 const ST_TIMEOUT_MS = 5000;
@@ -563,6 +565,9 @@ function allArtistNames(){
   const fromRecords = Object.values(artistsMap).map(r=>r.name);
   const fromArtworks = artworks.map(a=>a.artist);
   return [...new Set([...fromRecords, ...fromArtworks].filter(Boolean))].sort((x,y)=>x.localeCompare(y));
+}
+function allMuseumNames(){
+  return [...new Set(artworks.map(a=>a.museum).filter(Boolean))].sort((x,y)=>x.localeCompare(y));
 }
 async function loadArtists(){
   let keys = [];
@@ -1059,12 +1064,26 @@ function render(){
   else if(currentView==='creationDetail') view.innerHTML = renderCreationDetail(currentCreationId);
   attachDelegatedHandlers();
   if(currentView==='home') setupInfiniteScroll();
+  if(currentView==='home' && gallerySearchOpen && gallerySearchQuery) filterGallery();
   if(currentView==='detail'){
     const a = artworks.find(x=>x.id===currentArtworkId);
     if(a) setupDetailStickyHeader(a); else teardownDetailStickyHeader();
   } else {
     teardownDetailStickyHeader();
   }
+}
+function toggleGallerySearch(){
+  gallerySearchOpen = !gallerySearchOpen;
+  if(!gallerySearchOpen) gallerySearchQuery = '';
+  render();
+  if(gallerySearchOpen){ const el = document.getElementById('gallerySearchInput'); if(el) el.focus(); }
+}
+function filterGallery(){
+  gallerySearchQuery = document.getElementById('gallerySearchInput').value;
+  const q = gallerySearchQuery.trim().toLowerCase();
+  document.querySelectorAll('.home-grid img').forEach(img => {
+    img.style.display = img.dataset.search.indexOf(q) !== -1 ? '' : 'none';
+  });
 }
 function setupInfiniteScroll(){
   const sentinel = document.getElementById('scrollSentinel');
@@ -1120,10 +1139,11 @@ function renderHome(){
   const hasMore = homeRenderCount < homeShuffleIds.length;
 
   return `
-    <div class="home-toolbar"><h1>Galerie</h1><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--ink-soft)">${filtered.length} œuvre${filtered.length>1?'s':''}</span></div>
+    <div class="home-toolbar"><h1>Galerie</h1><div style="display:flex;align-items:center;gap:10px;"><button class="edit-link" onclick="toggleGallerySearch()" title="Rechercher" style="font-size:15px;text-decoration:none;">🔍</button><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--ink-soft)">${filtered.length} œuvre${filtered.length>1?'s':''}</span></div></div>
+    ${gallerySearchOpen ? `<div style="margin-bottom:14px;"><input type="text" id="gallerySearchInput" value="${esc(gallerySearchQuery)}" placeholder="Rechercher par titre, artiste ou mot-clé..." oninput="filterGallery()"></div>` : ''}
     ${homeFilter.type==='tag' ? `<div class="active-filter-note">Filtré par mot-clé « ${esc(homeFilter.value)} » <button onclick="clearFilter()">effacer</button></div>` : ''}
     ${homeFilter.type==='movement' ? `<div class="active-filter-note">Filtré par courant « ${esc(homeFilter.value)} » <button onclick="clearFilter()">effacer</button></div>` : ''}
-    ${items.length ? `<div class="home-grid">${items.map(a=>`<img src="${imgSrc(a)}" alt="${esc(a.title)}" title="${esc(a.title)}${a.period?` (${esc(a.period)})`:''} — ${esc(a.artist)}" data-artwork="${a.id}">`).join('')}</div>` : `<p style="color:var(--ink-soft);font-size:13px;">Aucune œuvre pour ce filtre.</p>`}
+    ${items.length ? `<div class="home-grid">${items.map(a=>`<img src="${imgSrc(a)}" alt="${esc(a.title)}" title="${esc(a.title)}${a.period?` (${esc(a.period)})`:''} — ${esc(a.artist)}" data-artwork="${a.id}" data-search="${esc((a.title+' '+a.artist+' '+(a.tags||[]).join(' ')).toLowerCase())}">`).join('')}</div>` : `<p style="color:var(--ink-soft);font-size:13px;">Aucune œuvre pour ce filtre.</p>`}
     ${hasMore ? `<div id="scrollSentinel" style="height:1px;"></div><div class="loading">Chargement…</div>` : ''}
   `;
 }
@@ -1980,6 +2000,8 @@ function openForm(id){
   const artistList = allArtistNames();
   const isNewArtist = a.artist && !artistList.includes(a.artist);
   const artistOptions = artistList.map(n=>`<option value="${esc(n)}" ${a.artist===n?'selected':''}>${esc(n)}</option>`).join('');
+  const museumList = allMuseumNames();
+  const museumOptions = museumList.map(n=>`<option value="${esc(n)}" ${a.museum===n?'selected':''}>${esc(n)}</option>`).join('');
   const existingUrl = (a.imageUrl && !a.imageUrl.startsWith('data:')) ? a.imageUrl : '';
   document.getElementById('overlayContent').innerHTML = `
     <div class="modal-form">
@@ -2021,7 +2043,15 @@ function openForm(id){
       </fieldset>
       <fieldset>
         <legend>Où voir l'œuvre</legend>
-        <label>Musée / galerie</label><input type="text" id="f-museum" value="${a.museum||''}">
+        <label>Musée / galerie</label>
+        <select id="f-museum-select" onchange="document.getElementById('f-museum-new-wrap').style.display = this.value==='__new__' ? 'block' : 'none';">
+          <option value="">— Aucun / Choisir —</option>
+          ${museumOptions}
+          <option value="__new__" ${a.museum && !museumList.includes(a.museum) ? 'selected' : ''}>+ Nouveau lieu…</option>
+        </select>
+        <div id="f-museum-new-wrap" style="display:${a.museum && !museumList.includes(a.museum) ? 'block' : 'none'};margin-top:6px;">
+          <input type="text" id="f-museum-new" value="${a.museum && !museumList.includes(a.museum) ? esc(a.museum) : ''}" placeholder="Nom du nouveau lieu">
+        </div>
         <div class="row2"><div><label>Ville</label><input type="text" id="f-city" value="${a.museumCity||''}"></div><div><label>Pays</label><input type="text" id="f-country" value="${a.museumCountry||''}"></div></div>
       </fieldset>
       <div class="form-actions">
@@ -2058,6 +2088,8 @@ async function submitForm(){
   const title = document.getElementById('f-title').value.trim();
   const artistSelectVal = document.getElementById('f-artist-select').value;
   const artist = artistSelectVal === '__new__' ? document.getElementById('f-artist-new').value.trim() : artistSelectVal;
+  const museumSelectVal = document.getElementById('f-museum-select').value;
+  const museum = museumSelectVal === '__new__' ? document.getElementById('f-museum-new').value.trim() : museumSelectVal;
   if(!title || !artist){
     const el = document.getElementById('mainImageZone');
     if(el) el.insertAdjacentHTML('beforebegin', '<div style="color:var(--accent);font-size:12px;margin-bottom:8px;">Le titre et le nom de l\'artiste sont nécessaires.</div>');
@@ -2075,7 +2107,7 @@ async function submitForm(){
     composition: document.getElementById('f-composition').value.trim(),
     anecdote: document.getElementById('f-anecdote').value.trim(),
     tags: document.getElementById('f-tags').value.split(',').map(t=>t.trim()).filter(Boolean),
-    museum: document.getElementById('f-museum').value.trim(),
+    museum,
     museumCity: document.getElementById('f-city').value.trim(),
     museumCountry: document.getElementById('f-country').value.trim(),
   };
