@@ -1372,7 +1372,7 @@ function renderMovementPage(m){
         <h1 style="margin:0;">${m}</h1>
         <button class="navbtn" onclick="openMovementInfoEditForm('${esc(m)}')">✎ Éditer</button>
       </div>
-      <div class="period">${info.period}</div><p>${info.desc}</p>
+      <div class="period">${info.period}</div><div class="text-block">${paragraphs(info.desc)}</div>
       <div class="chrono">${info.chrono.map(([y,e])=>`<div class="chrono-item"><span class="year">${y}</span><span>${e}</span></div>`).join('')}</div>
     </div>
     <div class="section-title">Vos œuvres dans ce courant (${items.length})</div>
