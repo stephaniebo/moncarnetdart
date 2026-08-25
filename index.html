@@ -1401,7 +1401,7 @@ function renderCreationDetail(id){
   const c = creations.find(x=>x.id===id);
   if(!c) return `<p>Introuvable.</p>`;
   const titles = (c.titleDrafts||'').split('\n').map(s=>s.trim()).filter(Boolean);
-  const inspirationNames = (c.inspirationLinks||'').split(',').map(s=>s.trim()).filter(Boolean);
+  const inspirationNames = (Array.isArray(c.inspirationLinks) ? c.inspirationLinks : (c.inspirationLinks||'').split(',')).map(s=>s.trim()).filter(Boolean);
   const inspirationMatches = inspirationNames.map(t => artworks.find(a=>a.title.trim().toLowerCase()===t.toLowerCase())).filter(Boolean);
   const inspirationNotFound = inspirationNames.filter(t => !artworks.some(a=>a.title.trim().toLowerCase()===t.toLowerCase()));
   return `
@@ -1796,7 +1796,7 @@ function openCreationForm(id){
   const c = id ? creations.find(x=>x.id===id) : {};
   const currentMovements = c.movements || [];
   const movementOptionsMulti = movementKeysAlpha().map(m=>`<option value="${esc(m)}" ${currentMovements.includes(m)?'selected':''}>${esc(m)}</option>`).join('');
-  const currentInspirationTitles = (c.inspirationLinks||'').split(',').map(s=>s.trim().toLowerCase()).filter(Boolean);
+  const currentInspirationTitles = (Array.isArray(c.inspirationLinks) ? c.inspirationLinks : (c.inspirationLinks||'').split(',')).map(s=>s.trim().toLowerCase()).filter(Boolean);
   const inspirationRows = artworks.slice().sort((x,y)=>x.title.localeCompare(y.title)).map(a=>`
     <label class="inspiration-item" data-search="${esc((a.title+' '+a.artist).toLowerCase())}" style="display:flex;align-items:center;gap:6px;font-size:12.5px;padding:3px 0;font-weight:400;">
       <input type="checkbox" class="c-inspiration-cb" value="${esc(a.title)}" ${currentInspirationTitles.includes(a.title.trim().toLowerCase())?'checked':''}>
@@ -1851,7 +1851,7 @@ async function submitCreationForm(id){
     colors: document.getElementById('c-colors').value.trim(),
     mainElements: document.getElementById('c-elements').value.trim(),
     inspirationText: document.getElementById('c-inspiration').value.trim(),
-    inspirationLinks: [...document.querySelectorAll('.c-inspiration-cb:checked')].map(cb=>cb.value).join(', '),
+    inspirationLinks: [...document.querySelectorAll('.c-inspiration-cb:checked')].map(cb=>cb.value),
     movements: [...document.getElementById('c-movement-select').selectedOptions].map(o=>o.value),
     composition: document.getElementById('c-composition').value.trim(),
     feeling: document.getElementById('c-feeling').value.trim(),
