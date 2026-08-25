@@ -418,12 +418,109 @@ function withTimeout(promise, ms){
     new Promise((_, reject) => setTimeout(() => reject(new Error('Délai dépassé (le stockage ne répond pas)')), ms || ST_TIMEOUT_MS))
   ]);
 }
+function makeLocalStorageBackend(){
+  const NS = 'carnetart:';
+  return {
+    get: async (key) => {
+      const v = localStorage.getItem(NS+key);
+      return v === null ? null : { key, value: v };
+    },
+    set: async (key, value) => {
+      localStorage.setItem(NS+key, value);
+      return { key, value };
+    },
+    delete: async (key) => {
+      localStorage.removeItem(NS+key);
+      return { key, deleted: true };
+    },
+    list: async (prefix) => {
+      const keys = [];
+      for(let i=0;i<localStorage.length;i++){
+        const k = localStorage.key(i);
+        if(k && k.indexOf(NS) === 0 && k.slice(NS.length).indexOf(prefix) === 0) keys.push(k.slice(NS.length));
+      }
+      return { keys };
+    }
+  };
+}
+function makeIndexedDBBackend(){
+  let dbPromise = null;
+  function openDB(){
+    if(dbPromise) return dbPromise;
+    dbPromise = new Promise((resolve, reject) => {
+      const req = indexedDB.open('carnetart-db', 1);
+      req.onupgradeneeded = (e) => {
+        const db = e.target.result;
+        if(!db.objectStoreNames.contains('kv')) db.createObjectStore('kv');
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+    return dbPromise;
+  }
+  return {
+    get: async (key) => {
+      const db = await openDB();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction('kv','readonly');
+        const req = tx.objectStore('kv').get(key);
+        req.onsuccess = () => resolve(req.result !== undefined ? { key, value: req.result } : null);
+        req.onerror = () => reject(req.error);
+      });
+    },
+    set: async (key, value) => {
+      const db = await openDB();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction('kv','readwrite');
+        tx.objectStore('kv').put(value, key);
+        tx.oncomplete = () => resolve({ key, value });
+        tx.onerror = () => reject(tx.error);
+      });
+    },
+    delete: async (key) => {
+      const db = await openDB();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction('kv','readwrite');
+        tx.objectStore('kv').delete(key);
+        tx.oncomplete = () => resolve({ key, deleted: true });
+        tx.onerror = () => reject(tx.error);
+      });
+    },
+    list: async (prefix) => {
+      const db = await openDB();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction('kv','readonly');
+        const req = tx.objectStore('kv').getAllKeys();
+        req.onsuccess = () => resolve({ keys: req.result.filter(k => typeof k === 'string' && k.indexOf(prefix) === 0) });
+        req.onerror = () => reject(req.error);
+      });
+    }
+  };
+}
+const hasClaudeStorage = typeof window.storage !== 'undefined' && window.storage !== null;
+const storageBackend = hasClaudeStorage
+  ? window.storage
+  : (typeof indexedDB !== 'undefined' ? makeIndexedDBBackend() : makeLocalStorageBackend());
+if(!hasClaudeStorage) console.log('Carnet d\'art : hébergement autonome détecté, utilisation du stockage local du navigateur (' + (typeof indexedDB !== 'undefined' ? 'IndexedDB' : 'localStorage') + ').');
+
 const st = {
-  get: (key, shared) => withTimeout(window.storage.get(key, shared)),
-  set: (key, value, shared) => withTimeout(window.storage.set(key, value, shared)),
-  delete: (key, shared) => withTimeout(window.storage.delete(key, shared)),
-  list: (prefix, shared) => withTimeout(window.storage.list(prefix, shared)),
+  get: (key, shared) => withTimeout(storageBackend.get(key, shared)),
+  set: (key, value, shared) => withTimeout(storageBackend.set(key, value, shared)),
+  delete: (key, shared) => withTimeout(storageBackend.delete(key, shared)),
+  list: (prefix, shared) => withTimeout(storageBackend.list(prefix, shared)),
 };
+async function mapLimit(items, limit, fn){
+  const results = new Array(items.length);
+  let i = 0;
+  async function worker(){
+    while(i < items.length){
+      const idx = i++;
+      results[idx] = await fn(items[idx], idx);
+    }
+  }
+  await Promise.all(new Array(Math.min(limit, items.length)).fill(0).map(worker));
+  return results;
+}
 let homeRenderCount = 12;
 const HOME_BATCH = 12;
 function resetHomeScroll(){ homeShuffleIds = null; homeRenderCount = HOME_BATCH; }
@@ -465,25 +562,27 @@ async function loadArtists(){
   try{ const res = await st.list('artist:', false); keys = res && res.keys ? res.keys : []; }
   catch(e){ keys = []; }
   artistsMap = {};
-  const results = await Promise.all(keys.map(async key => {
+  const results = await mapLimit(keys, 5, async key => {
     try{ const r = await st.get(key, false); return r && r.value ? JSON.parse(r.value) : null; }
     catch(e){ return null; }
-  }));
+  });
   results.forEach(rec => { if(rec && rec.name) artistsMap[rec.name.trim().toLowerCase()] = rec; });
 }
 async function saveArtistRecord(rec){
   try{
     await st.set('artist:'+artistSlug(rec.name), JSON.stringify(rec), false);
     artistsMap[rec.name.trim().toLowerCase()] = rec;
-  }catch(e){ console.error('Erreur sauvegarde artiste', e); showStorageWarning(); }
+    return true;
+  }catch(e){ console.error('Erreur sauvegarde artiste', e); showStorageWarning(); return false; }
 }
 async function migrateArtistsFromArtworks(){
+  const attempted = new Set();
   for(const a of artworks){
-    if(a.artist && !getArtist(a.artist) && (a.artistBio||a.artistBirth||a.artistNationality||a.artistPhoto||a.artistMajorWorks||a.artistAlert)){
-      await saveArtistRecord({ name:a.artist, birth:a.artistBirth||'', death:a.artistDeath||'', nationality:a.artistNationality||'', bio:a.artistBio||'', photo:a.artistPhoto||'', instagram:a.artistInstagram||'', majorWorks:a.artistMajorWorks||'', alert:a.artistAlert||'' });
-    }
-    if(a.artist2 && !getArtist(a.artist2) && (a.artist2Bio||a.artist2Birth||a.artist2Nationality||a.artist2Photo||a.artist2MajorWorks||a.artist2Alert)){
-      await saveArtistRecord({ name:a.artist2, birth:a.artist2Birth||'', death:a.artist2Death||'', nationality:a.artist2Nationality||'', bio:a.artist2Bio||'', photo:a.artist2Photo||'', instagram:a.artist2Instagram||'', majorWorks:a.artist2MajorWorks||'', alert:a.artist2Alert||'' });
+    if(a.artist && !getArtist(a.artist) && !attempted.has(a.artist) && (a.artistBio||a.artistBirth||a.artistNationality||a.artistPhoto||a.artistMajorWorks||a.artistAlert)){
+      attempted.add(a.artist);
+      const ok = await saveArtistRecord({ name:a.artist, birth:a.artistBirth||'', death:a.artistDeath||'', nationality:a.artistNationality||'', bio:a.artistBio||'', photo:a.artistPhoto||'', instagram:a.artistInstagram||'', majorWorks:a.artistMajorWorks||'', alert:a.artistAlert||'' });
+      if(!ok) return; // stop the whole pass on first failure — don't hammer a struggling/rate-limited storage on every reload
+      await new Promise(r=>setTimeout(r,150));
     }
   }
 }
@@ -494,10 +593,10 @@ async function loadCreations(){
   let keys = [];
   try{ const res = await st.list('creation:', false); keys = res && res.keys ? res.keys : []; }
   catch(e){ keys = []; }
-  const results = await Promise.all(keys.map(async key => {
+  const results = await mapLimit(keys, 5, async key => {
     try{ const r = await st.get(key, false); return r && r.value ? JSON.parse(r.value) : null; }
     catch(e){ return null; }
-  }));
+  });
   creations = results.filter(Boolean);
 }
 async function saveCreation(c){
@@ -548,10 +647,10 @@ async function loadArtworks(){
     return;
   }
 
-  const results = await Promise.all(keys.map(async key => {
+  const results = await mapLimit(keys, 5, async key => {
     try{ const r = await st.get(key, false); return r && r.value ? JSON.parse(r.value) : null; }
     catch(e){ return null; }
-  }));
+  });
   artworks = results.filter(Boolean).map(normalizeArtwork);
 }
 function showLoadFailureWarning(){
@@ -808,7 +907,7 @@ function placeholderImg(a){
 function imgSrc(a){ return a.imageUrl && a.imageUrl.trim() ? a.imageUrl : placeholderImg(a); }
 function artistHasWorks(name){
   const n = name.trim().toLowerCase();
-  return artworks.some(a => a.artist.trim().toLowerCase()===n || (a.artist2 && a.artist2.trim().toLowerCase()===n));
+  return artworks.some(a => a.artist.trim().toLowerCase()===n);
 }
 
 /* Compress an uploaded/pasted image file into a small JPEG data URL */
@@ -936,7 +1035,8 @@ document.getElementById('importFile').addEventListener('change', (e)=>{
       goHome();
       showAlert(newOnes.length + ' œuvre(s) importée(s).');
     }catch(err){
-      showAlert("Le fichier n'a pas pu être importé — vérifiez qu'il s'agit bien d'un export de ce carnet.");
+      console.error('Erreur import', err);
+      showAlert("Le fichier n'a pas pu être importé : " + esc((err && err.message) || String(err)));
     }
   };
   reader.readAsText(file);
@@ -1041,7 +1141,7 @@ async function importLouvreSeed(){
 function goToNextArtwork(currentId){
   let pool;
   if(detailContext.type === 'movement') pool = artworks.filter(a => (a.movements||[]).includes(detailContext.value));
-  else if(detailContext.type === 'artist') pool = artworks.filter(a => { const n = detailContext.value.trim().toLowerCase(); return a.artist.trim().toLowerCase()===n || (a.artist2 && a.artist2.trim().toLowerCase()===n); });
+  else if(detailContext.type === 'artist') pool = artworks.filter(a => a.artist.trim().toLowerCase() === detailContext.value.trim().toLowerCase());
   else if(detailContext.type === 'tag') pool = artworks.filter(a => (a.tags||[]).includes(detailContext.value));
   else if(detailContext.type === 'location') pool = artworks.filter(a => a.museum && a.museum.trim().toLowerCase() === detailContext.value.trim().toLowerCase());
   else pool = artworks;
@@ -1210,7 +1310,7 @@ function renderDetail(id){
         <div class="catalog-tag">N°${String(a.id).padStart(3,'0')} — ajouté le ${a.dateAdded||''}</div>
         <h1>${esc(a.title)}</h1>
         ${a.originalTitle && a.originalTitle.trim().toLowerCase() !== a.title.trim().toLowerCase() ? `<div class="original-title">${esc(a.originalTitle)}</div>` : ''}
-        <div class="artist-line"><span class="a-link" data-artist="${esc(a.artist)}">${esc(a.artist)}</span>${(function(){const r=getArtist(a.artist);return r&&r.birth?`, ${r.birth}${r.death?'–'+r.death:''}`:'';})()}${(function(){const r=getArtist(a.artist);return r&&r.nationality?` · ${r.nationality}`:'';})()}${a.artist2?` &amp; <span class="a-link" data-artist="${esc(a.artist2)}">${esc(a.artist2)}</span>`:''}</div>
+        <div class="artist-line"><span class="a-link" data-artist="${esc(a.artist)}">${esc(a.artist)}</span>${(function(){const r=getArtist(a.artist);return r&&r.birth?`, ${r.birth}${r.death?'–'+r.death:''}`:'';})()}${(function(){const r=getArtist(a.artist);return r&&r.nationality?` · ${r.nationality}`:'';})()}</div>
         <div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:16px;">
           ${artMovements.map(m => `<button class="movement-badge" style="background:${movementInfo(m).color};margin-bottom:0;" onclick="showMovement('${m}')">${m}</button>`).join('')}
           <button class="edit-link" onclick="openMovementEditForm(${a.id})" style="margin-left:4px;">✎ Éditer le courant</button>
@@ -1242,7 +1342,7 @@ function renderDetail(id){
         </div>` : ''}
       </div>
       <div class="section">
-        <div class="section-title">${a.artist2 ? "Les artistes" : "L'artiste"}</div>
+        <div class="section-title">L'artiste</div>
         ${(function(){
           const rec = getArtist(a.artist) || {};
           return `<div class="artist-box">
@@ -1257,20 +1357,6 @@ function renderDetail(id){
           </div>
         </div>`;
         })()}
-        ${a.artist2 ? (function(){
-          const rec2 = getArtist(a.artist2) || {};
-          return `
-        <div class="artist-box" style="margin-top:16px;padding-top:16px;border-top:1px solid var(--line);">
-          <img class="artist-photo" src="${rec2.photo || placeholderImg({title:a.artist2,movements:artMovements})}" alt="${esc(a.artist2)}">
-          <div>
-            <span class="a-link" data-artist="${esc(a.artist2)}" style="font-weight:600;font-size:15px;">${esc(a.artist2)}</span>
-            <div class="meta-line">${rec2.nationality||''}${rec2.birth?` · né(e) en ${rec2.birth}`:''}${rec2.death?`, mort(e) en ${rec2.death}`:''}</div>
-            <div class="text-block" style="font-size:14px;">${rec2.bio ? firstSentences(rec2.bio,2) : 'Pas encore de biographie.'}</div>
-            ${rec2.instagram?`<div style="margin-top:8px;"><a href="${rec2.instagram}" target="_blank">Instagram →</a></div>`:''}
-            <div style="margin-top:8px;"><span class="a-link" data-artist="${esc(a.artist2)}" style="font-size:12px;">Voir la biographie complète →</span></div>
-          </div>
-        </div>`;
-        })() : ''}
       </div>
       <div class="section">
         <div class="section-title">Mes notes <button class="edit-link" onclick="toggleEditNotes(${a.id})">éditer</button></div>
@@ -1538,7 +1624,6 @@ function renderArtistsByMovementPage(){
     list.forEach(m => {
       byMovement[m] = byMovement[m] || new Set();
       byMovement[m].add(a.artist.trim());
-      if(a.artist2 && a.artist2.trim()) byMovement[m].add(a.artist2.trim());
     });
   });
   const movementsPresent = movementKeys().filter(m => byMovement[m] && byMovement[m].size > 0);
@@ -1582,7 +1667,7 @@ function renderLocationPage(name){
 
 function renderArtistPage(name){
   const n = name.trim().toLowerCase();
-  const items = artworks.filter(a => a.artist.trim().toLowerCase()===n || (a.artist2 && a.artist2.trim().toLowerCase()===n));
+  const items = artworks.filter(a => a.artist.trim().toLowerCase()===n);
   const ref = getArtist(name) || {};
   const majorWorksList = (ref.majorWorks || '').split(/\n+/).map(s=>s.trim()).filter(Boolean);
   return `
@@ -1975,11 +2060,6 @@ function openForm(id){
         <label>Nom *</label><input type="text" id="f-artist" value="${a.artist||''}">
         ${a.artist ? `<div style="margin-top:6px;"><button type="button" class="edit-link" onclick="openArtistEditForm('${esc(a.artist)}')">Modifier la fiche de ${esc(a.artist)} →</button></div>` : `<div style="font-size:11.5px;color:var(--ink-soft);margin-top:4px;">La biographie se modifie depuis la fiche artiste, une fois l'œuvre enregistrée.</div>`}
         <label>Artistes proches / similaires</label><input type="text" id="f-similar" value="${a.similarArtists||''}" placeholder="séparés par des virgules">
-      </fieldset>
-      <fieldset>
-        <legend>Second artiste (optionnel — si collaboration)</legend>
-        <label>Nom</label><input type="text" id="f-artist2" value="${a.artist2||''}" placeholder="ex. architecte co-auteur">
-        ${a.artist2 ? `<div style="margin-top:6px;"><button type="button" class="edit-link" onclick="openArtistEditForm('${esc(a.artist2)}')">Modifier la fiche de ${esc(a.artist2)} →</button></div>` : ''}
       </fieldset>
       <fieldset>
         <legend>Où voir l'œuvre</legend>
@@ -2440,7 +2520,6 @@ async function submitForm(){
     anecdote: document.getElementById('f-anecdote').value.trim(),
     tags: document.getElementById('f-tags').value.split(',').map(t=>t.trim()).filter(Boolean),
     similarArtists: document.getElementById('f-similar').value.trim(),
-    artist2: document.getElementById('f-artist2').value.trim(),
     museum: document.getElementById('f-museum').value.trim(),
     museumCity: document.getElementById('f-city').value.trim(),
     museumCountry: document.getElementById('f-country').value.trim(),
@@ -2488,7 +2567,10 @@ document.getElementById('overlay').addEventListener('click', (e)=>{ if(e.target.
 /* ================= INIT ================= */
 (async function init(){
   document.getElementById('view').innerHTML = '<div class="loading">Chargement de votre carnet…</div>';
-  await Promise.all([loadArtworks(), loadArtists(), loadCustomMovements(), loadCreations()]);
+  await loadArtworks();
+  await loadArtists();
+  await loadCustomMovements();
+  await loadCreations();
   await migrateArtistsFromArtworks();
   render();
 })();
