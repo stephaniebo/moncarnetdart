@@ -613,12 +613,23 @@ async function loadCreations(){
 }
 async function saveCreation(c){
   const payload = JSON.stringify(c);
-  try{
+  const attempt = async () => {
     const res = await st.set('creation:'+c.id, payload, false);
     if(!res) throw new Error('no response');
     const check = await st.get('creation:'+c.id, false);
-    if(!check || check.value !== payload) throw new Error('not confirmed');
-  }catch(e){ console.error('Erreur sauvegarde création', e); showStorageWarning(); }
+    if(!check || check.value !== payload) throw new Error('write not confirmed on read-back');
+  };
+  try{
+    await attempt();
+  }catch(e){
+    try{
+      await new Promise(r=>setTimeout(r,300));
+      await attempt();
+    }catch(e2){
+      console.error('Erreur sauvegarde création (2 tentatives)', e2);
+      showStorageWarning();
+    }
+  }
 }
 async function deleteCreationStorage(id){
   try{ const res = await st.delete('creation:'+id, false); return !!res; }
@@ -1022,6 +1033,7 @@ function showCreations(){ currentView='creations'; render(); window.scrollTo(0,0
 function showCreationDetail(id){ currentView='creationDetail'; currentCreationId=id; render(); window.scrollTo(0,0); }
 function showArtistsByMovement(){ currentView='artistsByMovement'; render(); window.scrollTo(0,0); }
 function showAllMovements(){ currentView='allMovements'; render(); window.scrollTo(0,0); }
+function showTagCloud(){ currentView='tagCloud'; render(); window.scrollTo(0,0); }
 function filterByTag(tag){ homeFilter={type:'tag', value:tag}; resetHomeScroll(); goHome(); }
 function filterByMovement(m){ homeFilter = (m==='Tous') ? {type:null,value:null} : {type:'movement', value:m}; resetHomeScroll(); render(); }
 function clearFilter(){ homeFilter={type:null,value:null}; resetHomeScroll(); render(); }
@@ -1060,6 +1072,7 @@ function render(){
   else if(currentView==='location') view.innerHTML = renderLocationPage(currentLocationName);
   else if(currentView==='artistsByMovement') view.innerHTML = renderArtistsByMovementPage();
   else if(currentView==='allMovements') view.innerHTML = renderAllMovementsPage();
+  else if(currentView==='tagCloud') view.innerHTML = renderTagCloudPage();
   else if(currentView==='creations') view.innerHTML = renderCreationsPage();
   else if(currentView==='creationDetail') view.innerHTML = renderCreationDetail(currentCreationId);
   attachDelegatedHandlers();
@@ -1139,11 +1152,11 @@ function renderHome(){
   const hasMore = homeRenderCount < homeShuffleIds.length;
 
   return `
-    <div class="home-toolbar"><h1>Galerie</h1><div style="display:flex;align-items:center;gap:10px;"><button class="edit-link" onclick="toggleGallerySearch()" title="Rechercher" style="font-size:15px;text-decoration:none;">🔍</button><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--ink-soft)">${filtered.length} œuvre${filtered.length>1?'s':''}</span></div></div>
+    <div class="home-toolbar"><h1>Galerie</h1><div style="display:flex;align-items:center;gap:10px;"><button class="edit-link" onclick="showTagCloud()" title="Nuage de mots-clés" style="font-size:15px;text-decoration:none;">☁️</button><button class="edit-link" onclick="toggleGallerySearch()" title="Rechercher" style="font-size:15px;text-decoration:none;">🔍</button><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--ink-soft)">${filtered.length} œuvre${filtered.length>1?'s':''}</span></div></div>
     ${gallerySearchOpen ? `<div style="margin-bottom:14px;"><input type="text" id="gallerySearchInput" value="${esc(gallerySearchQuery)}" placeholder="Rechercher par titre, artiste ou mot-clé..." oninput="filterGallery()"></div>` : ''}
     ${homeFilter.type==='tag' ? `<div class="active-filter-note">Filtré par mot-clé « ${esc(homeFilter.value)} » <button onclick="clearFilter()">effacer</button></div>` : ''}
     ${homeFilter.type==='movement' ? `<div class="active-filter-note">Filtré par courant « ${esc(homeFilter.value)} » <button onclick="clearFilter()">effacer</button></div>` : ''}
-    ${items.length ? `<div class="home-grid">${items.map(a=>`<img src="${imgSrc(a)}" alt="${esc(a.title)}" title="${esc(a.title)}${a.period?` (${esc(a.period)})`:''} — ${esc(a.artist)}" data-artwork="${a.id}" data-search="${esc((a.title+' '+a.artist+' '+(a.tags||[]).join(' ')).toLowerCase())}">`).join('')}</div>` : `<p style="color:var(--ink-soft);font-size:13px;">Aucune œuvre pour ce filtre.</p>`}
+    ${items.length ? `<div class="home-grid">${items.map(a=>`<img src="${imgSrc(a)}" alt="${esc(a.title)}" title="${esc(a.title)}${a.period?` (${esc(a.period)})`:''} — ${esc(a.artist)}" data-artwork="${a.id}" data-search="${esc((a.title+' '+(a.originalTitle||'')+' '+a.artist+' '+(a.tags||[]).join(' ')).toLowerCase())}">`).join('')}</div>` : `<p style="color:var(--ink-soft);font-size:13px;">Aucune œuvre pour ce filtre.</p>`}
     ${hasMore ? `<div id="scrollSentinel" style="height:1px;"></div><div class="loading">Chargement…</div>` : ''}
   `;
 }
@@ -1467,6 +1480,31 @@ function renderCreationDetail(id){
   `;
 }
 
+function renderTagCloudPage(){
+  const counts = {};
+  artworks.forEach(a => (a.tags||[]).forEach(t => { const k = t.trim(); if(k){ counts[k] = (counts[k]||0) + 1; } }));
+  const entries = Object.entries(counts).sort((a,b)=>b[1]-a[1]);
+  if(entries.length === 0){
+    return `<button class="back" onclick="goHome()">← Retour à la galerie</button><div class="empty-state"><h2>Pas encore de mots-clés</h2><p>Ajoutez des mots-clés à vos œuvres pour voir le nuage se remplir.</p></div>`;
+  }
+  const maxCount = entries[0][1];
+  const minCount = entries[entries.length-1][1];
+  const range = Math.max(1, maxCount - minCount);
+  return `
+    <button class="back" onclick="goHome()">← Retour à la galerie</button>
+    <div class="home-toolbar"><h1>Nuage de mots-clés</h1></div>
+    <p style="color:var(--ink-soft);font-size:13px;margin-top:-10px;margin-bottom:24px;max-width:600px;">Plus un mot-clé est grand, plus vous l'avez utilisé — un aperçu de ce qui vous attire le plus. Cliquez un mot pour filtrer la galerie.</p>
+    <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:baseline;">
+      ${entries.map(([tag,count]) => {
+        const ratio = (count - minCount) / range;
+        const size = 13 + ratio * 28; // 13px to 41px
+        const weight = ratio > 0.5 ? 600 : 400;
+        return `<span data-tag="${esc(tag)}" style="cursor:pointer;font-size:${size.toFixed(1)}px;font-weight:${weight};font-family:'Fraunces',serif;color:${ratio>0.6?'var(--accent)':'var(--ink)'};line-height:1.3;" title="${count} œuvre${count>1?'s':''}">${esc(tag)}</span>`;
+      }).join('')}
+    </div>
+  `;
+}
+
 function renderAllMovementsPage(){
   const keys = movementKeys(); // chronological insertion order, custom-added ones appended at the end
   const mains = keys.filter(m => !movementInfo(m).parent);
@@ -1523,20 +1561,36 @@ function renderArtistsByMovementPage(){
     return `<div class="empty-state"><h2>Pas encore d'artiste à afficher</h2><p>Ajoutez des œuvres à votre carnet pour voir cette page se remplir.</p></div>`;
   }
 
+  const lettersPresent = new Set(names.map(n => n[0].toUpperCase()));
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+
   return `
     <div class="home-toolbar"><h1>Artistes</h1></div>
-    <p style="color:var(--ink-soft);font-size:13px;margin-top:-10px;margin-bottom:24px;max-width:600px;">Vos artistes, par ordre alphabétique.</p>
-    ${names.map(name => {
-      const movementsForArtist = [...byArtist[name]];
-      return `
-      <div class="section" style="padding:14px 0;">
-        <span class="a-link" data-artist="${esc(name)}" style="font-family:'Fraunces',serif;font-weight:500;font-size:17px;">${esc(name)}</span>
-        <div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:6px;">
-          ${movementsForArtist.map(m => `<span style="font-family:'IBM Plex Mono',monospace;font-size:10px;padding:2px 8px;border-radius:10px;background:${movementInfo(m).color};color:white;cursor:pointer;" onclick="showMovement('${m}')">${m}</span>`).join('')}
-        </div>
-        <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap;">${artworks.filter(a=>a.artist.trim()===name).slice(0,6).map(a=>`<img src="${imgSrc(a)}" data-artwork="${a.id}" title="${esc(a.title)}" style="width:52px;height:52px;object-fit:cover;border-radius:3px;cursor:pointer;">`).join('')}</div>
-      </div>`;
-    }).join('')}
+    <p style="color:var(--ink-soft);font-size:13px;margin-top:-10px;margin-bottom:14px;max-width:600px;">Vos artistes, par ordre alphabétique.</p>
+    <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:22px;font-family:'IBM Plex Mono',monospace;font-size:12px;">
+      ${alphabet.map(l => lettersPresent.has(l)
+        ? `<a href="#artist-letter-${l}" style="padding:3px 7px;border-radius:3px;background:var(--paper-card);border:1px solid var(--line);color:var(--ink);text-decoration:none;">${l}</a>`
+        : `<span style="padding:3px 7px;color:var(--line);">${l}</span>`
+      ).join('')}
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(240px, 1fr));gap:16px;">
+      ${names.map((name,i) => {
+        const letter = name[0].toUpperCase();
+        const isFirstOfLetter = i===0 || names[i-1][0].toUpperCase() !== letter;
+        const movementsForArtist = [...byArtist[name]];
+        const thumbs = artworks.filter(a=>a.artist.trim()===name).slice(0,4);
+        return `
+        <div ${isFirstOfLetter ? `id="artist-letter-${letter}"` : ''} style="border:1px solid var(--line);border-radius:3px;padding:14px;background:var(--paper-card);">
+          <span class="a-link" data-artist="${esc(name)}" style="font-family:'Fraunces',serif;font-weight:500;font-size:15.5px;">${esc(name)}</span>
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin-top:10px;">
+            ${thumbs.map(a=>`<img src="${imgSrc(a)}" data-artwork="${a.id}" title="${esc(a.title)}" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:3px;cursor:pointer;">`).join('') || `<div style="grid-column:span 4;font-size:11px;color:var(--ink-soft);">Pas d'image</div>`}
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:10px;">
+            ${movementsForArtist.map(m => `<span style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;padding:2px 7px;border-radius:10px;background:${movementInfo(m).color};color:white;cursor:pointer;" onclick="showMovement('${m}')">${m}</span>`).join('')}
+          </div>
+        </div>`;
+      }).join('')}
+    </div>
   `;
 }
 
