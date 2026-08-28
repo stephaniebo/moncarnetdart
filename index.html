@@ -931,9 +931,29 @@ document.getElementById('importFile').addEventListener('change', (e)=>{
       for(const a of newOnes){ a.id = id++; }
       artworks = artworks.concat(newOnes);
       for(const a of newOnes){ await saveArtwork(a); }
+
+      // Recover any legacy embedded artist bio data present in the imported file
+      // (old format, before artist fiches were centralized), even for artworks
+      // that were already present and skipped above as duplicates.
+      let biosRecovered = 0;
+      const attemptedNames = new Set();
+      for(const a of imported){
+        if(a && a.artist && !attemptedNames.has(a.artist) && !getArtist(a.artist) &&
+           (a.artistBio||a.artistBirth||a.artistDeath||a.artistNationality||a.artistPhoto||a.artistInstagram)){
+          attemptedNames.add(a.artist);
+          const ok = await saveArtistRecord({
+            name: a.artist, birth: a.artistBirth||'', death: a.artistDeath||'',
+            nationality: a.artistNationality||'', bio: a.artistBio||'',
+            photo: a.artistPhoto||'', instagram: a.artistInstagram||'',
+            majorWorks: a.artistMajorWorks||'', alert: a.artistAlert||''
+          });
+          if(ok) biosRecovered++;
+        }
+      }
+
       resetHomeScroll();
       goHome();
-      showAlert(newOnes.length + ' œuvre(s) importée(s).');
+      showAlert(newOnes.length + ' œuvre(s) importée(s).' + (biosRecovered ? ' ' + biosRecovered + ' biographie(s) d\'artiste récupérée(s).' : ''));
     }catch(err){
       console.error('Erreur import', err);
       showAlert("Le fichier n'a pas pu être importé : " + esc((err && err.message) || String(err)));
