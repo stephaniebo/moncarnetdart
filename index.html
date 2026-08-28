@@ -581,11 +581,30 @@ async function loadArtists(){
   results.forEach(rec => { if(rec && rec.name) artistsMap[rec.name.trim().toLowerCase()] = rec; });
 }
 async function saveArtistRecord(rec){
+  const payload = JSON.stringify(rec);
+  const key = 'artist:'+artistSlug(rec.name);
+  const attempt = async () => {
+    const res = await st.set(key, payload, false);
+    if(!res) throw new Error('no response');
+    const check = await st.get(key, false);
+    if(!check || check.value !== payload) throw new Error('write not confirmed on read-back');
+  };
   try{
-    await st.set('artist:'+artistSlug(rec.name), JSON.stringify(rec), false);
+    await attempt();
     artistsMap[rec.name.trim().toLowerCase()] = rec;
     return true;
-  }catch(e){ console.error('Erreur sauvegarde artiste', e); showStorageWarning(); return false; }
+  }catch(e){
+    try{
+      await new Promise(r=>setTimeout(r,300));
+      await attempt();
+      artistsMap[rec.name.trim().toLowerCase()] = rec;
+      return true;
+    }catch(e2){
+      console.error('Erreur sauvegarde artiste (2 tentatives)', e2);
+      showStorageWarning();
+      return false;
+    }
+  }
 }
 async function migrateArtistsFromArtworks(){
   const attempted = new Set();
@@ -1034,6 +1053,18 @@ function showCreationDetail(id){ currentView='creationDetail'; currentCreationId
 function showArtistsByMovement(){ currentView='artistsByMovement'; render(); window.scrollTo(0,0); }
 function showAllMovements(){ currentView='allMovements'; render(); window.scrollTo(0,0); }
 function showTagCloud(){ currentView='tagCloud'; render(); window.scrollTo(0,0); }
+let tagCloudEditMode = false;
+function toggleTagCloudEdit(){ tagCloudEditMode = !tagCloudEditMode; render(); }
+async function deleteTagGlobally(tag){
+  showConfirm(`Supprimer le mot-clé « ${tag} » de toutes vos œuvres ?`, async ()=>{
+    const affected = artworks.filter(a => (a.tags||[]).includes(tag));
+    for(const a of affected){
+      a.tags = (a.tags||[]).filter(t => t !== tag);
+      await saveArtwork(a);
+    }
+    render();
+  });
+}
 function filterByTag(tag){ homeFilter={type:'tag', value:tag}; resetHomeScroll(); goHome(); }
 function filterByMovement(m){ homeFilter = (m==='Tous') ? {type:null,value:null} : {type:'movement', value:m}; resetHomeScroll(); render(); }
 function clearFilter(){ homeFilter={type:null,value:null}; resetHomeScroll(); render(); }
@@ -1492,13 +1523,16 @@ function renderTagCloudPage(){
   const range = Math.max(1, maxCount - minCount);
   return `
     <button class="back" onclick="goHome()">← Retour à la galerie</button>
-    <div class="home-toolbar"><h1>Nuage de mots-clés</h1></div>
-    <p style="color:var(--ink-soft);font-size:13px;margin-top:-10px;margin-bottom:24px;max-width:600px;">Plus un mot-clé est grand, plus vous l'avez utilisé — un aperçu de ce qui vous attire le plus. Cliquez un mot pour filtrer la galerie.</p>
-    <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:baseline;">
+    <div class="home-toolbar"><h1>Nuage de mots-clés</h1><button class="navbtn" onclick="toggleTagCloudEdit()">${tagCloudEditMode?'Terminer':'✎ Éditer'}</button></div>
+    <p style="color:var(--ink-soft);font-size:13px;margin-top:-10px;margin-bottom:24px;max-width:600px;">${tagCloudEditMode ? "Cliquez la croix pour supprimer un mot-clé de toutes vos œuvres." : "Plus un mot-clé est grand, plus vous l'avez utilisé — un aperçu de ce qui vous attire le plus. Cliquez un mot pour filtrer la galerie."}</p>
+    <div style="display:flex;flex-wrap:wrap;gap:${tagCloudEditMode?'10px':'12px'};align-items:baseline;">
       ${entries.map(([tag,count]) => {
         const ratio = (count - minCount) / range;
-        const size = 13 + ratio * 28; // 13px to 41px
+        const size = tagCloudEditMode ? 15 : 13 + ratio * 28;
         const weight = ratio > 0.5 ? 600 : 400;
+        if(tagCloudEditMode){
+          return `<span style="display:inline-flex;align-items:center;gap:4px;border:1px solid var(--line);border-radius:12px;padding:4px 6px 4px 12px;font-family:'IBM Plex Mono',monospace;font-size:12.5px;">${esc(tag)} <button onclick="deleteTagGlobally('${esc(tag)}')" style="background:var(--accent);color:white;border:none;border-radius:50%;width:16px;height:16px;font-size:10px;line-height:1;cursor:pointer;padding:0;">✕</button></span>`;
+        }
         return `<span data-tag="${esc(tag)}" style="cursor:pointer;font-size:${size.toFixed(1)}px;font-weight:${weight};font-family:'Fraunces',serif;color:${ratio>0.6?'var(--accent)':'var(--ink)'};line-height:1.3;" title="${count} œuvre${count>1?'s':''}">${esc(tag)}</span>`;
       }).join('')}
     </div>
@@ -1578,13 +1612,20 @@ function renderArtistsByMovementPage(){
         const letter = name[0].toUpperCase();
         const isFirstOfLetter = i===0 || names[i-1][0].toUpperCase() !== letter;
         const movementsForArtist = [...byArtist[name]];
-        const thumbs = artworks.filter(a=>a.artist.trim()===name).slice(0,4);
+        const allWorksForArtist = artworks.filter(a=>a.artist.trim()===name);
+        const thumbs = allWorksForArtist.slice(0,4);
+        const hasMore = allWorksForArtist.length > 4;
+        const artistRec = getArtist(name);
         return `
         <div ${isFirstOfLetter ? `id="artist-letter-${letter}"` : ''} style="border:1px solid var(--line);border-radius:3px;padding:14px;background:var(--paper-card);">
-          <span class="a-link" data-artist="${esc(name)}" style="font-family:'Fraunces',serif;font-weight:500;font-size:15.5px;">${esc(name)}</span>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <img src="${(artistRec&&artistRec.photo) || placeholderImg({title:name, movements:[]})}" alt="" style="width:28px;height:28px;border-radius:50%;object-fit:cover;flex-shrink:0;">
+            <span class="a-link" data-artist="${esc(name)}" style="font-family:'Fraunces',serif;font-weight:500;font-size:15.5px;">${esc(name)}</span>
+          </div>
           <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin-top:10px;">
             ${thumbs.map(a=>`<img src="${imgSrc(a)}" data-artwork="${a.id}" title="${esc(a.title)}" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:3px;cursor:pointer;">`).join('') || `<div style="grid-column:span 4;font-size:11px;color:var(--ink-soft);">Pas d'image</div>`}
           </div>
+          ${hasMore ? `<div style="text-align:center;font-family:'IBM Plex Mono',monospace;font-size:13px;color:var(--ink-soft);margin-top:4px;" title="${allWorksForArtist.length} œuvres au total">⋯</div>` : ''}
           <div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:10px;">
             ${movementsForArtist.map(m => `<span style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;padding:2px 7px;border-radius:10px;background:${movementInfo(m).color};color:white;cursor:pointer;" onclick="showMovement('${m}')">${m}</span>`).join('')}
           </div>
@@ -1647,6 +1688,15 @@ function renderArtistPage(name){
     </div>
     <div class="section-title">${items.length} œuvre${items.length>1?'s':''} dans votre carnet</div>
     <div class="artist-grid">${items.map(a=>`<img src="${imgSrc(a)}" data-artwork="${a.id}" title="${esc(a.title)}">`).join('')}</div>
+    ${(function(){
+      const tagCounts = {};
+      items.forEach(a => (a.tags||[]).forEach(t => { const k=t.trim(); if(k) tagCounts[k]=(tagCounts[k]||0)+1; }));
+      const tagList = Object.keys(tagCounts).sort((x,y)=>tagCounts[y]-tagCounts[x]);
+      if(!tagList.length) return '';
+      return `
+      <div class="section-title" style="margin-top:20px;">Mots-clés de ses œuvres</div>
+      <div class="tags">${tagList.map(t=>`<span data-tag="${esc(t)}">${esc(t)}</span>`).join('')}</div>`;
+    })()}
   `;
 }
 
