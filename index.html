@@ -608,13 +608,40 @@ async function saveArtistRecord(rec){
 }
 async function migrateArtistsFromArtworks(){
   const attempted = new Set();
+  let consecutiveFailures = 0;
+  const LEGACY_FIELDS = ['artistBio','artistBirth','artistDeath','artistNationality','artistPhoto','artistInstagram','artistMajorWorks','artistAlert','similarArtists'];
+
   for(const a of artworks){
-    if(a.artist && !getArtist(a.artist) && !attempted.has(a.artist) && (a.artistBio||a.artistBirth||a.artistNationality||a.artistPhoto||a.artistMajorWorks||a.artistAlert)){
+    const hasLegacyData = LEGACY_FIELDS.some(f => a[f]);
+    if(!hasLegacyData) continue;
+
+    if(a.artist && !getArtist(a.artist) && !attempted.has(a.artist)){
       attempted.add(a.artist);
-      const ok = await saveArtistRecord({ name:a.artist, birth:a.artistBirth||'', death:a.artistDeath||'', nationality:a.artistNationality||'', bio:a.artistBio||'', photo:a.artistPhoto||'', instagram:a.artistInstagram||'', majorWorks:a.artistMajorWorks||'', alert:a.artistAlert||'' });
-      if(!ok) return; // stop the whole pass on first failure — don't hammer a struggling/rate-limited storage on every reload
+      const created = await saveArtistRecord({
+        name:a.artist, birth:a.artistBirth||'', death:a.artistDeath||'', nationality:a.artistNationality||'',
+        bio:a.artistBio||'', photo:a.artistPhoto||'', instagram:a.artistInstagram||'',
+        majorWorks:a.artistMajorWorks||'', alert:a.artistAlert||''
+      });
+      if(!created){
+        consecutiveFailures++;
+        if(consecutiveFailures >= 2) return; // storage seems to be struggling — stop rather than hammer it further
+        continue; // don't strip this artwork's data since we couldn't preserve it in the artist fiche
+      }
+      consecutiveFailures = 0;
       await new Promise(r=>setTimeout(r,150));
     }
+
+    // The artist now has (or already had) a centralized fiche — these per-artwork
+    // copies are redundant and can cause the two to drift apart. Remove them.
+    LEGACY_FIELDS.forEach(f => delete a[f]);
+    const saved = await saveArtwork(a);
+    if(!saved){
+      consecutiveFailures++;
+      if(consecutiveFailures >= 2) return;
+      continue;
+    }
+    consecutiveFailures = 0;
+    await new Promise(r=>setTimeout(r,150));
   }
 }
 
@@ -715,14 +742,17 @@ async function saveArtwork(a){
   };
   try{
     await attempt();
+    return true;
   }catch(e){
     try{
       await new Promise(r=>setTimeout(r,300));
       await attempt();
+      return true;
     }catch(e2){
       storageFailCount++;
       if(storageFailCount === 1) console.error('Sauvegarde impossible sur cet appareil (stockage indisponible ou non confirmé).', e2);
       showStorageWarning();
+      return false;
     }
   }
 }
@@ -965,59 +995,6 @@ document.getElementById('importFile').addEventListener('change', (e)=>{
 
 document.getElementById('moreMenuBtn').addEventListener('click', (e)=>{ e.stopPropagation(); document.getElementById('moreDropdown').classList.toggle('open'); });
 document.addEventListener('click', ()=>{ document.getElementById('moreDropdown').classList.remove('open'); });
-
-async function fetchLocationOnly(title, artist){
-  const prompt = `Pour l'œuvre "${title}" de ${artist}, réponds UNIQUEMENT avec un objet JSON valide, sans backticks ni texte autour :
-{
-  "museum": "nom du musée, de la galerie, du lieu ou de la collection où l'œuvre se trouve ou est exposée ; utilise \"Collection privée\" si non localisable publiquement",
-  "museumCity": "ville, chaîne vide si vraiment inconnue",
-  "museumCountry": "pays, chaîne vide si vraiment inconnue",
-  "museumLink": "URL du site officiel si connue, chaîne vide sinon"
-}
-Sois factuel, n'invente rien que tu ne sois pas raisonnablement sûr.`;
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 300, messages: [{ role: "user", content: prompt }] })
-  });
-  if(!response.ok) throw new Error('Erreur API ' + response.status);
-  const data = await response.json();
-  const textResp = (data.content || []).filter(b=>b.type==='text').map(b=>b.text).join('\n');
-  const clean = textResp.replace(/```json|```/g,'').trim().replace(/[\r\n]+/g,' ');
-  return JSON.parse(clean);
-}
-
-async function fillMissingLocations(){
-  const missing = artworks.filter(a => !a.museum || !a.museum.trim());
-  if(missing.length === 0){ showAlert("Toutes vos œuvres ont déjà un lieu renseigné."); return; }
-  document.getElementById('overlayContent').innerHTML = `
-    <div class="modal-form" style="max-width:400px;">
-      <h2>Complétion des lieux</h2>
-      <div class="sub">${missing.length} œuvre(s) sans lieu renseigné.</div>
-      <div id="fillLocStatus" style="font-size:13px;color:var(--ink-soft);"></div>
-      <div class="form-actions"><button class="small-btn ghost" onclick="closeForm()">Fermer</button></div>
-    </div>`;
-  document.getElementById('overlay').classList.add('open');
-  const statusEl = document.getElementById('fillLocStatus');
-  let done = 0, failed = 0;
-  for(const a of missing){
-    statusEl.textContent = `Traitement ${done+1}/${missing.length} : ${a.title}…`;
-    try{
-      const loc = await fetchLocationOnly(a.title, a.artist);
-      a.museum = loc.museum || a.museum;
-      a.museumCity = loc.museumCity || a.museumCity;
-      a.museumCountry = loc.museumCountry || a.museumCountry;
-      a.museumLink = loc.museumLink || a.museumLink;
-      await saveArtwork(a);
-      done++;
-    }catch(e){
-      console.error('Erreur lieu pour', a.title, e);
-      failed++;
-    }
-  }
-  statusEl.innerHTML = `Terminé — ${done} complétée(s)${failed?`, ${failed} échec(s)`:''}.`;
-  render();
-}
 
 function showAlert(message){
   document.getElementById('overlayContent').innerHTML = `
